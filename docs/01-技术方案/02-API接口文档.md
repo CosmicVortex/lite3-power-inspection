@@ -2,7 +2,8 @@
 
 > **文档编号**: API接口文档  
 > **版本**: V1.1  
-> **更新日期**: 2026-08-18
+> **编制日期**: 2026-08-18  
+> **编制人**: 陈伟
 
 ---
 
@@ -43,7 +44,7 @@
   "type": "inspection_result",
   "payload": {
     "defect_type": "crack",
-    "subtype": " longitudinal",
+    "subtype": "longitudinal",
     "location": {
       "image_x": 120,
       "image_y": 340,
@@ -98,13 +99,16 @@
     "hotspot_ratio": 0.12,
     "temperature_rate": 3.2,
     "thermal_snapshot_url": "http://192.168.1.120:8080/thermal/ALT-20260818-002.jpg",
-    "waypoint_id": "WP-05",
-    "duration_seconds": 45
+    "ptz_state": {
+      "yaw": 15.0,
+      "pitch": -10.0,
+      "zoom": 5
+    }
   }
 }
 ```
 
-#### 1.3.3 系统状态心跳 (heartbeat)
+#### 1.3.3 状态心跳 (heartbeat)
 
 ```json
 {
@@ -113,18 +117,12 @@
   "deviceId": "LITE3-001",
   "type": "heartbeat",
   "payload": {
-    "battery_percent": 85,
-    "battery_voltage": 23.5,
-    "cpu_temp": 45.2,
-    "gpu_temp": 52.1,
-    "memory_used_percent": 65,
-    "pose": {
-      "x": 1.234,
-      "y": 0.567,
-      "theta": 0.123
-    },
-    "mode": "INSPECTING",
-    "uptime_seconds": 3600
+    "battery": 85,
+    "cpu_temp": 52.3,
+    "gpu_load": 45,
+    "memory_usage": 62,
+    "fps": 15,
+    "network_latency": 3
   }
 }
 ```
@@ -142,7 +140,7 @@
 ```http
 GET /Login.cgi?Type=WEB&Expires=30 HTTP/1.1
 Host: 192.168.1.108
-Authorization: Basic YWRtaW46MTIzNDU2
+Authorization: Basic ***
 ```
 
 响应：
@@ -208,6 +206,85 @@ Cookie: MerlinSession=abc123xyz
   "Status": "OK"
 }
 ```
+
+#### 2.1.6 方向控制
+
+```http
+POST /SetPtzDirection.cgi HTTP/1.1
+Host: 192.168.1.108
+Content-Type: application/json
+Cookie: MerlinSession=abc123xyz
+
+{
+  "Direction": {
+    "ptz_opt": "up",
+    "speed": 20
+  }
+}
+```
+
+**支持的方向参数**：
+| ptz_opt | 说明 |
+|---------|------|
+| left-up | 左上 |
+| right-down | 右下 |
+| left-down | 左下 |
+| right-up | 右上 |
+| left | 左 |
+| right | 右 |
+| up | 上 |
+| down | 下 |
+| stop | 停止 |
+
+#### 2.1.7 电机使能
+
+```http
+POST /SetPtzAbility.cgi HTTP/1.1
+Host: 192.168.1.108
+Content-Type: application/json
+Cookie: MerlinSession=abc123xyz
+
+{
+  "Motor": {
+    "Enable": 2
+  }
+}
+```
+
+**Enable参数说明**：
+| 值 | 说明 |
+|----|------|
+| 0 | 关闭电机 |
+| 1 | 启动电机 |
+| 2 | 重启电机 |
+
+#### 2.1.8 云台控制（PtzCtrl）
+
+```http
+GET /PtzCtrl.cgi?Operation=2&Speed=20 HTTP/1.1
+Host: 192.168.1.108
+Cookie: MerlinSession=abc123xyz
+```
+
+**操作码说明**：
+| 值 | 说明 |
+|----|------|
+| 0 | 停止云台操作 |
+| 1 | 左上 |
+| 2 | 上 |
+| 3 | 右上 |
+| 4 | 左 |
+| 5 | 右 |
+| 6 | 左下 |
+| 7 | 下 |
+| 8 | 右下 |
+| 9 | 变倍+ |
+| 10 | 变倍- |
+| 11 | 变焦+ |
+| 12 | 变焦- |
+| 13 | 光圈+ |
+| 14 | 光圈- |
+| 20 | 转到预置点 |
 
 ### 2.2 快照获取接口
 
@@ -306,10 +383,7 @@ ret, thermal_frame = cap_thermal.read()
 
 ---
 
-
----
-
-## 六、网络配置
+## 五、网络配置
 
 | 设备 | IP地址 | 备注 |
 |------|--------|------|
@@ -318,7 +392,7 @@ ret, thermal_frame = cap_thermal.read()
 | 监测平台 | 192.168.1.200 | 第三方提供 |
 | 赛场路由器 | 192.168.1.1 | DHCP关闭，静态分配 |
 
-## 五、错误码定义
+## 六、错误码定义
 
 | 错误码 | 含义 | 处理建议 | 责任方 |
 |--------|------|----------|--------|
@@ -337,15 +411,4 @@ ret, thermal_frame = cap_thermal.read()
 
 ---
 
-*文档版本: V1.0 | 更新日期: 2026-08-18 | 编制人: 陈伟*
-
----
-
-## 七、注意事项
-
-1. **Session管理**: 登录成功后必须定期发送心跳，否则Session会在30秒后过期
-2. **角度限制**: 俯仰角pitch范围为-115°~40°，超出范围指令将失效
-3. **变焦稳定**: 变焦后需等待500ms让云台稳定再拍照
-4. **权限管理**: 默认账号密码为admin/123456，生产环境建议修改
-5. **并发限制**: 同一云台实例最多支持3个并发连接
-
+*文档版本: V1.1 | 更新日期: 2026-08-18 | 编制人: 陈伟*
