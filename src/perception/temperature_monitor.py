@@ -6,7 +6,7 @@
 
 import cv2
 import numpy as np
-from typing import Tuple, Dict, Optional, Deque
+from typing import Tuple, Dict, Optional, Deque, List
 from dataclasses import dataclass
 from enum import Enum
 from collections import deque
