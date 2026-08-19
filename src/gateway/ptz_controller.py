@@ -29,7 +29,7 @@ class PtzController:
     """
     
     # 角度限制
-    YAW_RANGE = (-180.0, 180.0)
+    YAW_RANGE = (-280.0, 280.0)  # 协议规范: (-280°, 280°)
     PITCH_RANGE = (-115.0, 40.0)
     ROLL_RANGE = (-30.0, 30.0)
     

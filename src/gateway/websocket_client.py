@@ -103,7 +103,11 @@ class WebSocketGateway:
         Args:
             result: 检测结果
         """
-        await self.send_message("inspection_result", result)
+        message = {
+            "device_id": self.device_id,
+            **result
+        }
+        await self.send_message("inspection_result", message)
     
     async def send_temperature_alert(self, alert: Dict):
         """上报温度告警
@@ -144,7 +148,7 @@ class WebSocketGateway:
             "ts": int(time.time() * 1000),
             "deviceId": self.device_id,
             "type": msg_type,
-            "data": data
+            "payload": data
         }
     
     def _cache_message(self, message: Dict):

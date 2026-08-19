@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-监测平台WebSocket服务端 - 独立运行版本
-用于接收机器人上报的巡检数据
+监测平台WebSocket服务端 - 支持真实和模拟数据
+
+用于接收机器人上报的巡检数据并可视化展示
 """
 
 import asyncio
@@ -14,7 +16,7 @@ from typing import Dict, List, Optional
 
 import websockets
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 
 # 配置日志
@@ -68,14 +70,18 @@ class MonitorServer:
         msg_type = data.get("type")
         timestamp = time.time()
         
+        # 兼容 payload 和 data 字段
+        payload = data.get("payload", data.get("data", {}))
+        device_id = data.get("deviceId", data.get("device_id", "LITE3-001"))
+        
         if msg_type == "inspection_result":
             # 存储巡检结果
             result = {
                 "id": f"INS_{int(timestamp * 1000)}",
                 "timestamp": timestamp,
                 "datetime": datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S"),
-                "device_id": data.get("device_id", "LITE3-001"),
-                "data": data.get("data", {})
+                "device_id": device_id,
+                "data": payload
             }
             inspections.append(result)
             
@@ -89,6 +95,25 @@ class MonitorServer:
             })
             
             logger.info(f"收到巡检数据: {result['id']}")
+        
+        elif msg_type == "temperature_alert":
+            # 存储温度告警
+            alert = {
+                "id": f"ALT_{int(timestamp * 1000)}",
+                "timestamp": timestamp,
+                "datetime": datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S"),
+                "device_id": device_id,
+                "data": payload
+            }
+            alerts.append(alert)
+            
+            # 广播告警
+            await self.broadcast({
+                "type": "temperature_alert",
+                "data": alert
+            })
+            
+            logger.warning(f"收到温度告警: {payload.get('alert_level')} - {payload.get('temperature', {}).get('max_c')}℃")
         
         elif msg_type == "heartbeat":
             await websocket.send(json.dumps({
@@ -122,7 +147,7 @@ class MonitorServer:
             alerts.append(alert)
             logger.warning(f"温度告警: {alert['value']}℃")
         
-        # 裂缝告警（数量>0且置信度>0.8）
+        # 裂缝告警
         crack_data = data.get("crack", {})
         if crack_data.get("detected") and crack_data.get("count", 0) > 0:
             for detail in crack_data.get("details", []):
@@ -243,9 +268,8 @@ async def send_demo():
     """发送演示数据"""
     demo_data = {
         "type": "inspection_result",
-        "device_id": "LITE3-001",
-        "timestamp": time.time(),
-        "data": {
+        "deviceId": "LITE3-001",
+        "payload": {
             "crack": {
                 "detected": True,
                 "count": 2,
@@ -265,8 +289,9 @@ async def send_demo():
         }
     }
     # 模拟处理
-    import asyncio
-    dummy_ws = None  # 临时对象
+    class DummyWS:
+        pass
+    dummy_ws = DummyWS()
     await monitor.process_message(demo_data, dummy_ws)
     return {"status": "ok", "message": "演示数据已发送"}
 
