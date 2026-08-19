@@ -59,7 +59,7 @@
       "zoom_level": 10
     },
     "confidence": 0.92,
-    "snapshot_url": "http://192.168.1.120:8080/snap/ALT-20260818-001.jpg",
+    "snapshot_url": "http://192.168.1.103:8080/snap/ALT-20260818-001.jpg",
     "waypoint_id": "WP-03",
     "ptz_state": {
       "yaw": 45.0,
@@ -98,7 +98,7 @@
     },
     "hotspot_ratio": 0.12,
     "temperature_rate": 3.2,
-    "thermal_snapshot_url": "http://192.168.1.120:8080/thermal/ALT-20260818-002.jpg",
+    "thermal_snapshot_url": "http://192.168.1.103:8080/thermal/ALT-20260818-002.jpg",
     "ptz_state": {
       "yaw": 15.0,
       "pitch": -10.0,
@@ -289,8 +289,8 @@ Cookie: MerlinSession=abc123xyz
 ### 2.2 快照获取接口
 
 ```http
-GET http://192.168.1.120:8080/snap/{alert_id}.jpg
-GET http://192.168.1.120:8080/thermal/{alert_id}.jpg
+GET http://192.168.1.103:8080/snap/{alert_id}.jpg
+GET http://192.168.1.103:8080/thermal/{alert_id}.jpg
 ```
 
 ---
@@ -387,7 +387,7 @@ ret, thermal_frame = cap_thermal.read()
 
 | 设备 | IP地址 | 备注 |
 |------|--------|------|
-| 绝影Lite3机器狗 | 192.168.1.120 | 静态IP，WiFi接入 |
+|| 绝影Lite3机器狗 | 192.168.1.103 | 静态IP，WiFi接入 |
 | 双光谱云台相机 | 192.168.1.108 | 静态IP，出厂默认 |
 | 监测平台 | 192.168.1.200 | 第三方提供 |
 | 赛场路由器 | 192.168.1.1 | DHCP关闭，静态分配 |
