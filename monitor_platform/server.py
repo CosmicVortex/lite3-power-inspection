@@ -84,16 +84,17 @@ class MonitorServer:
                 "data": payload
             }
             inspections.append(result)
-            
+
             # 检查告警
             self.check_alerts(result)
-            
-            # 广播给所有客户端
+
+            # 转换为UI期望的数据结构并广播
+            ui_data = self._convert_to_ui_format(result)
             await self.broadcast({
                 "type": "inspection_result",
-                "data": result
+                "data": ui_data
             })
-            
+
             logger.info(f"收到巡检数据: {result['id']}")
         
         elif msg_type == "temperature_alert":
@@ -127,6 +128,49 @@ class MonitorServer:
                 "message": f"Unknown message type: {msg_type}"
             }))
     
+    def _convert_to_ui_format(self, result: Dict) -> Dict:
+        """将内部数据格式转换为UI期望的数据格式
+
+        UI期望格式:
+        {
+            "crack": {"detected": bool, "count": int, "details": [...]},
+            "temperature": {"status": str, "value": float}
+        }
+        """
+        payload = result.get("data", {})
+
+        # 处理裂缝检测数据
+        crack_data = {
+            "detected": False,
+            "count": 0,
+            "details": []
+        }
+
+        if payload.get("defect_type") == "crack":
+            crack_data["detected"] = True
+            crack_data["count"] = 1
+            crack_data["details"].append({
+                "id": f"CRACK_{int(result['timestamp'] * 1000)}",
+                "width_mm": payload.get("measurements", {}).get("width_mm", 0),
+                "length_mm": payload.get("measurements", {}).get("length_mm", 0),
+                "confidence": payload.get("confidence", 0),
+                "location": payload.get("location", {})
+            })
+
+        # 处理温度数据
+        temp_data = payload.get("temperature", {})
+        alert_level = payload.get("alert_level", "NORMAL")
+
+        ui_data = {
+            "crack": crack_data,
+            "temperature": {
+                "status": alert_level,
+                "value": temp_data.get("max_c", 0) if temp_data else 0
+            }
+        }
+
+        return ui_data
+
     def check_alerts(self, result: Dict):
         """检查并生成告警"""
         data = result.get("data", {})

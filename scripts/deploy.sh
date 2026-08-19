@@ -3,8 +3,8 @@
 
 set -e
 
-REMOTE_HOST="admin@192.168.1.103"
-PROJECT_DIR="/home/admin/lite3-power-inspection"
+REMOTE_HOST="ysc@192.168.1.103"
+PROJECT_DIR="/home/ysc/lite3-power-inspection"
 PYTHON_VENV="$PROJECT_DIR/venv"
 
 echo "=========================================="
