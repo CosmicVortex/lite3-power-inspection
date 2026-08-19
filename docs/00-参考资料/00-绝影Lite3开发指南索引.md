@@ -26,6 +26,15 @@ Welcome to the DeepRobotics Jueying Lite3 Development Guide! Please click to swi
 
 ---
 
+### 🎨 可视化文档（HTML格式）
+
+| 文档名称 | 说明 | 链接 |
+|---------|------|------|
+| **绝影Lite3三折页** | 产品规格对比页面，支持响应式布局 | [查看](./02-绝影Lite3三折页.html) |
+| **绝影Lite3产品手册** | 结构化产品展示，含规格参数和接口说明 | [查看](./01-绝影Lite3产品手册V2.0.0.html) |
+
+---
+
 ## 指南内容概览
 
 ### 1. 运动开发指南
