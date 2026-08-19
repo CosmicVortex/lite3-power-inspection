@@ -300,7 +300,7 @@ graph LR
 
 | 层级 | 技术 | 说明 |
 |------|------|------|
-| 中间件 | ROS2 Foxy | 与Lite3 SDK兼容 |
+| 中间件 | Python 3.8+ | 机器人通信与控制 |
 | 推理框架 | TensorRT 8.x (INT8量化) | 视觉检测模型加速 |
 | 视频订阅 | OpenCV + PyAV | 拉取云台三路RTSP流 |
 | 通信网关 | Python 3.8 + websockets + FastAPI | WebSocket/HTTP接口 |
