@@ -3,7 +3,7 @@
 
 set -e
 
-REMOTE_HOST="admin@192.168.1.120"
+REMOTE_HOST="admin@192.168.1.103"
 PROJECT_DIR="/home/admin/lite3-power-inspection"
 PYTHON_VENV="$PROJECT_DIR/venv"
 
@@ -18,7 +18,7 @@ ping -c 2 $REMOTE_HOST > /dev/null 2>&1 || {
     echo "请确认："
     echo "  1. 机器狗主机已开机"
     echo "  2. WiFi网络连接正常"
-    echo "  3. IP地址192.168.1.120正确"
+    echo "  3. IP地址192.168.1.103正确"
     exit 1
 }
 echo "✅ 网络连接正常"
@@ -72,9 +72,9 @@ echo "项目目录: $PROJECT_DIR"
 echo "Python环境: $PYTHON_VENV/bin/python3"
 echo ""
 echo "启动监测平台:"
-echo "  cd $PROJECT_DIR && source $PYTHON_VENV/bin/activate && python3 src/app/monitor_platform.py"
+echo "  cd $PROJECT_DIR && source $PYTHON_VENV/bin/activate && python3 scripts/start_monitor.py"
 echo ""
-echo "访问地址: http://192.168.1.120:5000"
+echo "访问地址: http://192.168.1.103:8000"
 echo ""
 echo "运行测试:"
-echo "  cd $PROJECT_DIR && source $PYTHON_VENV/bin/activate && python3 scripts/test_all.py"
+echo "  cd $PROJECT_DIR && source $PYTHON_VENV/bin/activate && python3 scripts/run_demo.py --mode simulation"

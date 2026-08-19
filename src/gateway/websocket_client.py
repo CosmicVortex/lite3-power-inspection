@@ -165,20 +165,30 @@ class WebSocketGateway:
         """刷新缓存队列，重发未发送消息"""
         if not self._queue:
             return
-        
+
         logger.info(f"刷新缓存队列，共{len(self._queue)}条消息")
-        
-        async def _flush():
-            for message in self._queue[:]:
-                try:
-                    await self._ws.send(json.dumps(message, ensure_ascii=False))
-                    self._queue.remove(message)
-                    logger.debug("缓存消息重发成功")
-                except Exception as e:
-                    logger.error(f"缓存消息重发失败: {e}")
-                    break
-        
-        asyncio.get_event_loop().run_until_complete(_flush())
+        self._flush_sync()
+
+    def _flush_sync(self):
+        """同步刷新缓存队列（线程安全）"""
+        import asyncio as _asyncio
+        loop = _asyncio.new_event_loop()
+        try:
+            _asyncio.set_event_loop(loop)
+
+            async def _flush():
+                for message in self._queue[:]:
+                    try:
+                        await self._ws.send(json.dumps(message, ensure_ascii=False))
+                        self._queue.remove(message)
+                        logger.debug("缓存消息重发成功")
+                    except Exception as e:
+                        logger.error(f"缓存消息重发失败: {e}")
+                        break
+
+            loop.run_until_complete(_flush())
+        finally:
+            loop.close()
     
     @property
     def is_connected(self) -> bool:

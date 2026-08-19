@@ -41,7 +41,7 @@ class SnapshotServer:
         app.router.add_get('/snap/{filename}', self._handle_snap_request)
         app.router.add_get('/thermal/{filename}', self._handle_thermal_request)
         
-        self._server = await loop.create_server(
+        self._server = await asyncio.get_running_loop().create_server(
             web.AppRunner(app).setup(),
             self.host,
             self.port
@@ -119,7 +119,7 @@ class SnapshotServer:
 
 
 # 全局单例
-_loop = asyncio.get_event_loop() if asyncio.get_event_loop().is_running() else None
+_loop = None
 _snapshot_server = None
 
 

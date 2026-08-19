@@ -1,0 +1,90 @@
+# 绝影Lite3电力巡检系统配置
+
+# 网络配置
+network:
+  robot_motion:
+    ip: "192.168.1.103"
+    port: 43893
+  ptz:
+    base_url: "http://192.168.1.108"
+    username: "admin"
+    password: "123456"
+  websocket:
+    server_url: "ws://192.168.1.200:8765/ws"
+  monitor:
+    http_host: "0.0.0.0"
+    http_port: 8000
+    ws_host: "0.0.0.0"
+    ws_port: 8765
+
+# 相机配置
+camera:
+  streams:
+    visible_light_main: "rtsp://admin:123456@192.168.1.108:554/id=1&type=0"
+    visible_light_sub: "rtsp://admin:123456@192.168.1.108:554/id=1&type=1"
+    thermal: "rtsp://admin:123456@192.168.1.108:554/id=2&type=0"
+  resolution:
+    width: 640
+    height: 480
+  fps: 30
+
+# 云台配置
+ptz:
+  yaw_range: [-280, 280]
+  pitch_range: [-90, 45]
+  zoom_range: [1, 20]
+  session_timeout: 30
+  default_speed: 20
+
+# 感知配置
+perception:
+  yolo:
+    model_path: "models/yolov8s-crack.trt"
+    confidence_threshold: 0.5
+    input_size: [640, 640]
+  unet:
+    model_path: "models/unet-crack.onnx"
+    confidence_threshold: 0.6
+  temperature:
+    warn_threshold: 45.0
+    critical_threshold: 50.0
+    roi_size: [50, 50]
+
+# 存储配置
+storage:
+  type: "sqlite"
+  db_path: "data/inspection.db"
+  cache_ttl: 3600
+  max_records: 10000
+
+# 日志配置
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "data/logs/app.log"
+
+# 演示配置
+demo:
+  enabled: true
+  mode: "simulation"
+  waypoints:
+    - id: "WP001"
+      position: [0.5, 0.5, 0.0]
+      ptz_yaw: 45.0
+      ptz_pitch: -30.0
+    - id: "WP002"
+      position: [1.0, 0.5, 0.0]
+      ptz_yaw: 90.0
+      ptz_pitch: -30.0
+    - id: "WP003"
+      position: [1.5, 0.5, 0.0]
+      ptz_yaw: 135.0
+      ptz_pitch: -30.0
+    - id: "WP004"
+      position: [0.5, 1.0, 0.0]
+      ptz_yaw: 180.0
+      ptz_pitch: -45.0
+    - id: "WP005"
+      position: [1.0, 1.0, 0.0]
+      ptz_yaw: 225.0
+      ptz_pitch: -45.0
