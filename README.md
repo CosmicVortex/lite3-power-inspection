@@ -10,7 +10,6 @@
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](#license)
 [![Python](https://img.shields.io/badge/Python-3.8+-green.svg)](https://www.python.org/)
-[![ROS2](https://img.shields.io/badge/ROS2-Foxy-orange.svg)](https://docs.ros.org/)
 [![TensorRT](https://img.shields.io/badge/TensorRT-8.x-red.svg)](https://developer.nvidia.com/tensorrt)
 
 </div>
