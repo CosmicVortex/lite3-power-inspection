@@ -31,7 +31,7 @@ class UNetSegmentor:
     支持10×变焦下的高精度测量。
     """
     
-    def __init__(self, model_path: str,
+    def __init__(self, model_path: Optional[str] = None,
                  pixel_precision: float = 0.019,
                  min_area_px2: int = 10):
         """
