@@ -5,6 +5,7 @@ RTSP视频流客户端
 """
 
 import cv2
+import numpy as np
 import threading
 import time
 from typing import Optional, Tuple, Dict

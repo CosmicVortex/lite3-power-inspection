@@ -333,7 +333,8 @@ class PtzController:
         return self._session_token is not None and \
                time.time() - self._last_heartbeat < self.SESSION_EXPIRE_TIME
     
-    def get_state(self) -> PtzState:
+    @property
+    def state(self) -> PtzState:
         """获取云台状态"""
         return self._state
 
