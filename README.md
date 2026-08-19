@@ -1,4 +1,4 @@
-# 绝影Lite3 电力巡检演示系统
+# 绝影Lite3 电力巡检演示方案
 
 <div align="center">
 
@@ -6,7 +6,7 @@
 
 **广西电力职院机器狗电力巡检国赛项目**
 
-基于云深处绝影Lite3专业版机器狗的双光谱云台巡检解决方案
+基于云深处绝影Lite3专业版机器狗的电力巡检演示方案
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](#license)
 [![Python](https://img.shields.io/badge/Python-3.8+-green.svg)](https://www.python.org/)
@@ -21,7 +21,7 @@
 
 | 项目 | 内容 |
 |------|------|
-| **项目名称** | 绝影Lite3电力巡检演示系统 |
+| **项目名称** | 绝影Lite3电力巡检演示方案 |
 | **应用背景** | 广西电力职院机器狗电力巡检国赛 |
 | **硬件平台** | 云深处绝影Lite3专业版 + 数尔安防双光谱云台相机 |
 | **巡检目标** | 混凝土裂缝检测（≥0.1mm）、温度监测（双级告警） |
