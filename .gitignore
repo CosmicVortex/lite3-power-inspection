@@ -4,8 +4,8 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
 venv/
+env/
 ENV/
 build/
 develop-eggs/
@@ -23,35 +23,33 @@ wheels/
 .installed.cfg
 *.egg
 
+# 数据文件
+data/*.db
+data/*.sqlite
+data/snapshots/
+data/thermal_snapshots/
+data/logs/
+
+# 模型文件
+models/*.trt
+models/*.onnx
+models/*.cache
+!models/.gitkeep
+
+# 配置文件（含敏感信息）
+.env
+!.env.example
+
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
 
-# 日志
-logs/
-*.log
-
-# 竞赛数据
-data/
-results/
-screenshots/
-
-# 地图文件
-maps/*.pgm
-maps/*.yaml
-
-# 临时文件
-*.tmp
-*.temp
-
-# 系统文件
+# OS
 .DS_Store
 Thumbs.db
 
-# 虚拟环境
-.pyenv/
-.venv/
-venv/
+# 临时文件
+*.tmp
+*.log
