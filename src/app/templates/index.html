@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>绝影Lite3 电力巡检监测平台</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary-color: #0d6efd;
+            --success-color: #198754;
+            --warning-color: #ffc107;
+            --danger-color: #dc3545;
+            --dark-bg: #1a1a2e;
+            --card-bg: #16213e;
+            --text-light: #eaeaea;
+        }
+        
+        body {
+            background: linear-gradient(135deg, var(--dark-bg) 0%, #0f0f23 100%);
+            color: var(--text-light);
+            min-height: 100vh;
+        }
+        
+        .navbar {
+            background: rgba(22, 33, 62, 0.95) !important;
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .card {
+            background: var(--card-bg);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        
+        .card-header {
+            background: rgba(13, 110, 253, 0.1);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            font-weight: 600;
+        }
+        
+        .stat-card {
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        
+        .stat-label {
+            color: #888;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .status-connected { background: var(--success-color); }
+        .status-disconnected { background: var(--danger-color); }
+        .status-warning { background: var(--warning-color); }
+        
+        .btn-custom {
+            background: linear-gradient(135deg, var(--primary-color), #0b5ed7);
+            border: none;
+            color: white;
+            padding: 8px 20px;
+            border-radius: 8px;
+            transition: all 0.3s;
+        }
+        
+        .btn-custom:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(13, 110, 253, 0.4);
+            color: white;
+        }
+        
+        .table {
+            color: var(--text-light);
+        }
+        
+        .table-dark {
+            background: transparent;
+        }
+        
+        .alert-badge {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+        }
+        
+        .alert-normal { background: rgba(25, 135, 84, 0.2); color: var(--success-color); }
+        .alert-warn { background: rgba(255, 193, 7, 0.2); color: var(--warning-color); }
+        .alert-critical { background: rgba(220, 53, 69, 0.2); color: var(--danger-color); }
+        
+        .log-entry {
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            padding: 8px;
+            border-left: 3px solid var(--primary-color);
+            margin-bottom: 5px;
+            background: rgba(0,0,0,0.2);
+        }
+        
+        .log-info { border-left-color: var(--primary-color); }
+        .log-success { border-left-color: var(--success-color); }
+        .log-warning { border-left-color: var(--warning-color); }
+        .log-error { border-left-color: var(--danger-color); }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .pulse { animation: pulse 2s infinite; }
+        
+        .chart-container {
+            position: relative;
+            height: 300px;
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-dark mb-4">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-robot"></i> 绝影Lite3 电力巡检监测平台
+            </a>
+            <div class="navbar-nav ms-auto">
+                <span class="navbar-text me-3">
+                    <span class="status-indicator status-connected pulse"></span>
+                    系统在线
+                </span>
+                <button class="btn btn-sm btn-outline-light me-2" onclick="refreshData()">
+                    <i class="bi bi-arrow-clockwise"></i> 刷新
+                </button>
+                <button class="btn btn-sm btn-custom" data-bs-toggle="modal" data-bs-target="#simulateModal">
+                    <i class="bi bi-play-circle"></i> 模拟测试
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid">
+        <!-- 统计卡片 -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card stat-card">
+                    <div class="stat-label">总检测次数</div>
+                    <div class="stat-value text-primary" id="totalInspections">0</div>
+                    <div class="text-muted small">inspection_results</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stat-card">
+                    <div class="stat-label">裂缝检测数</div>
+                    <div class="stat-value text-warning" id="crackDetected">0</div>
+                    <div class="text-muted small">裂缝缺陷</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stat-card">
+                    <div class="stat-label">温度告警数</div>
+                    <div class="stat-value text-danger" id="tempAlerts">0</div>
+                    <div class="text-muted small">异常温度</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stat-card">
+                    <div class="stat-label">系统状态</div>
+                    <div class="stat-value text-success" id="systemStatus">正常</div>
+                    <div class="text-muted small">运行中</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 图表区域 -->
+        <div class="row mb-4">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-graph-up"></i> 巡检数据趋势
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="trendChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-pie-chart"></i> 告警分布
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="alertChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 实时数据表格 -->
+        <div class="row">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-table"></i> 检测结果</span>
+                        <button class="btn btn-sm btn-outline-light" onclick="loadInspectionResults()">
+                            <i class="bi bi-arrow-clockwise"></i> 刷新
+                        </button>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-dark table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>时间</th>
+                                        <th>类型</th>
+                                        <th>航点</th>
+                                        <th>置信度</th>
+                                        <th>尺寸(mm)</th>
+                                        <th>温度(℃)</th>
+                                        <th>告警等级</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="resultsTable">
+                                    <tr><td colspan="7" class="text-center text-muted">暂无数据</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-exclamation-triangle"></i> 最近告警
+                    </div>
+                    <div class="card-body" id="alertsList" style="max-height: 400px; overflow-y: auto;">
+                        <div class="text-center text-muted">暂无告警</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 系统日志 -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-terminal"></i> 系统日志
+                    </div>
+                    <div class="card-body" id="logContainer" style="max-height: 300px; overflow-y: auto; font-size: 0.85rem;">
+                        <div class="log-entry log-info">系统启动，等待数据...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模拟测试模态框 -->
+    <div class="modal fade" id="simulateModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content" style="background: var(--card-bg); color: var(--text-light);">
+                <div class="modal-header">
+                    <h5 class="modal-title">模拟测试数据</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">模拟类型</label>
+                        <select class="form-select" id="simType">
+                            <option value="all">全部数据</option>
+                            <option value="crack">仅裂缝检测</option>
+                            <option value="temperature">仅温度告警</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">模拟数量</label>
+                        <input type="number" class="form-control" id="simCount" value="10" min="1" max="100">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-custom" onclick="startSimulation()">开始模拟</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 全局变量
+        let trendChart, alertChart;
+        
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            initCharts();
+            refreshData();
+            // 每5秒自动刷新
+            setInterval(refreshData, 5000);
+        });
+        
+        // 初始化图表
+        function initCharts() {
+            // 趋势图
+            const trendCtx = document.getElementById('trendChart').getContext('2d');
+            trendChart = new Chart(trendCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: '温度(℃)',
+                        data: [],
+                        borderColor: '#dc3545',
+                        backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                        tension: 0.4
+                    }, {
+                        label: '裂缝宽度(mm)',
+                        data: [],
+                        borderColor: '#ffc107',
+                        backgroundColor: 'rgba(255, 193, 7, 0.1)',
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { labels: { color: '#eaeaea' } }
+                    },
+                    scales: {
+                        x: { ticks: { color: '#888' }, grid: { color: 'rgba(255,255,255,0.1)' } },
+                        y: { ticks: { color: '#888' }, grid: { color: 'rgba(255,255,255,0.1)' } }
+                    }
+                }
+            });
+            
+            // 告警分布图
+            const alertCtx = document.getElementById('alertChart').getContext('2d');
+            alertChart = new Chart(alertCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['正常', '预警', '告警'],
+                    datasets: [{
+                        data: [0, 0, 0],
+                        backgroundColor: ['#198754', '#ffc107', '#dc3545']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { color: '#eaeaea' } }
+                    }
+                }
+            });
+        }
+        
+        // 刷新数据
+        async function refreshData() {
+            try {
+                // 获取系统状态
+                const statusRes = await fetch('/api/status');
+                const status = await statusRes.json();
+                
+                document.getElementById('totalInspections').textContent = status.inspection.total_results;
+                document.getElementById('crackDetected').textContent = status.inspection.crack_detected;
+                document.getElementById('tempAlerts').textContent = status.inspection.temperature_alerts;
+                
+                // 获取检测结果
+                loadInspectionResults();
+                
+                // 获取告警列表
+                loadAlerts();
+                
+                // 更新图表
+                updateCharts();
+                
+                addLog('数据刷新成功', 'success');
+            } catch (error) {
+                addLog('数据刷新失败: ' + error.message, 'error');
+            }
+        }
+        
+        // 加载检测结果
+        async function loadInspectionResults() {
+            try {
+                const res = await fetch('/api/inspection_results?limit=20');
+                const results = await res.json();
+                
+                const tbody = document.getElementById('resultsTable');
+                if (results.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">暂无数据</td></tr>';
+                    return;
+                }
+                
+                tbody.innerHTML = results.map(r => `
+                    <tr>
+                        <td>${new Date(r.timestamp).toLocaleString()}</td>
+                        <td><span class="badge bg-${r.type === 'crack' ? 'warning' : 'info'}">${r.type === 'crack' ? '裂缝' : '温度'}</span></td>
+                        <td>${r.waypoint_id || '-'}</td>
+                        <td>${r.confidence ? (r.confidence * 100).toFixed(1) + '%' : '-'}</td>
+                        <td>${r.width_mm ? r.width_mm.toFixed(2) + ' × ' + r.length_mm?.toFixed(1) : '-'}</td>
+                        <td>${r.temperature ? r.temperature.toFixed(1) : '-'}</td>
+                        <td><span class="alert-badge alert-${r.alert_level || 'normal'}">${getAlertText(r.alert_level)}</span></td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                addLog('加载检测结果失败', 'error');
+            }
+        }
+        
+        // 加载告警
+        async function loadAlerts() {
+            try {
+                const res = await fetch('/api/alerts?limit=10');
+                const alerts = await res.json();
+                
+                const container = document.getElementById('alertsList');
+                if (alerts.length === 0) {
+                    container.innerHTML = '<div class="text-center text-muted">暂无告警</div>';
+                    return;
+                }
+                
+                container.innerHTML = alerts.map(a => `
+                    <div class="alert alert-${a.level === 'critical' ? 'danger' : a.level === 'warn' ? 'warning' : 'success'} mb-2">
+                        <small>${new Date(a.timestamp).toLocaleTimeString()}</small><br>
+                        <strong>${a.alert_id}</strong> - ${a.details.temperature?.toFixed(1) + '℃' || '温度异常'}
+                    </div>
+                `).join('');
+            } catch (error) {
+                addLog('加载告警失败', 'error');
+            }
+        }
+        
+        // 更新图表
+        function updateCharts() {
+            // 获取统计数据
+            fetch('/api/statistics').then(r => r.json()).then(stats => {
+                // 更新趋势图数据（模拟）
+                const labels = ['10:00', '10:05', '10:10', '10:15', '10:20'];
+                trendChart.data.labels = labels;
+                trendChart.data.datasets[0].data = [42, 44, 46, 48, 50];
+                trendChart.data.datasets[1].data = [0.12, 0.15, 0.18, 0.22, 0.25];
+                trendChart.update();
+                
+                // 更新告警分布
+                alertChart.data.datasets[0].data = [stats.cracks.total, stats.temperatures.total, 0];
+                alertChart.update();
+            });
+        }
+        
+        // 开始模拟
+        async function startSimulation() {
+            const type = document.getElementById('simType').value;
+            const count = parseInt(document.getElementById('simCount').value);
+            
+            try {
+                const res = await fetch('/api/simulation', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({type, count})
+                });
+                
+                const result = await res.json();
+                addLog(`模拟测试完成，生成${result.count}条数据`, 'success');
+                refreshData();
+                
+                // 关闭模态框
+                bootstrap.Modal.getInstance(document.getElementById('simulateModal')).hide();
+            } catch (error) {
+                addLog('模拟测试失败: ' + error.message, 'error');
+            }
+        }
+        
+        // 辅助函数
+        function getAlertText(level) {
+            const map = { 'normal': '正常', 'warn': '预警', 'critical': '告警' };
+            return map[level] || '正常';
+        }
+        
+        function addLog(message, type = 'info') {
+            const container = document.getElementById('logContainer');
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            container.insertBefore(entry, container.firstChild);
+            
+            // 限制日志数量
+            while (container.children.length > 50) {
+                container.removeChild(container.lastChild);
+            }
+        }
+    </script>
+</body>
+</html>
