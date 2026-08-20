@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-绝影Lite3项目文档转换工具
-将Markdown文档转换为符合商业标准的DOCX格式
+批量将Markdown文档转换为DOCX格式
 """
 
 import subprocess
@@ -16,14 +15,26 @@ OUTPUT_DIR = Path("deliverables/docx")
 TEMPLATE_DIR = Path("templates")
 TEMPLATE_FILE = TEMPLATE_DIR / "commercial.docx"
 
-# 需要特殊处理的模式
-MERMAID_PATTERNS = [
-    r'```mermaid\s*\n(.*?)\n```',
-]
-
-ASCII_ART_PATTERNS = [
-    r'```\n([├┤┬┴┼┌┐└┘─│]+)\n```',
-]
+# Emoji转文字映射
+EMOJI_MAP = {
+    '📊': '[图表]',
+    '🦴': '[机器狗]',
+    '📷': '[相机]',
+    '🎯': '[目标]',
+    '🔍': '[检测]',
+    '📡': '[通信]',
+    '🌐': '[网络]',
+    '📹': '[视频]',
+    '🔬': '[分析]',
+    '🌡️': '[温度]',
+    '✅': '[通过]',
+    '⚠️': '[警告]',
+    '❌': '[失败]',
+    '📄': '[文档]',
+    '🔧': '[工具]',
+    '📦': '[包]',
+    '🚀': '[启动]',
+}
 
 def check_prerequisites():
     """检查前置条件"""
@@ -58,24 +69,8 @@ def preprocess_md(content: str) -> str:
     content = re.sub(r'<br\s*/?>', '\n', content)
     content = re.sub(r'<[^>]+>', '', content)
     
-    # 替换emoji为文字描述
-    emoji_replacements = {
-        '📊': '[图表]',
-        '🦴': '[机器狗]',
-        '📷': '[相机]',
-        '🎯': '[目标]',
-        '🔍': '[检测]',
-        '📡': '[通信]',
-        '🌐': '[网络]',
-        '📹': '[视频]',
-        '🔬': '[分析]',
-        '🌡️': '[温度]',
-        '✅': '[通过]',
-        '⚠️': '[警告]',
-        '❌': '[失败]',
-    }
-    
-    for emoji, text in emoji_replacements.items():
+    # 替换emoji
+    for emoji, text in EMOJI_MAP.items():
         content = content.replace(emoji, text)
     
     return content

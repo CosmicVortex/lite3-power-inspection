@@ -47,14 +47,6 @@ def create_commercial_template(output_path: str = "templates/commercial.docx"):
         heading_pf.space_before = Pt(12)
         heading_pf.space_after = Pt(6)
     
-    # 添加封面示例（可选）
-    # title_para = doc.add_paragraph()
-    # title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    # title_run = title_para.add_run('绝影Lite3电力巡检系统')
-    # title_run.font.name = 'SimHei'
-    # title_run.font.size = Pt(22)
-    # title_run.bold = True
-    
     # 保存模板
     doc.save(output_path)
     print(f"✅ 商业级模板已创建: {output_path}")
