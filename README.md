@@ -427,31 +427,53 @@ lite3-power-inspection/
 
 ### 8.2 核心接口定义
 
-#### WebSocket数据上报
+#### WebSocket数据上报（机器狗 → 平台）
 
-```
-端点: ws://192.168.1.200:8765/ws
-消息格式:
+**端点**: `ws://192.168.1.200:8765/ws`（或 `ws://192.168.1.103:8765/ws` 本地测试）
+
+**消息格式**:
+```json
 {
+    "msgId": "uuid-v4",
+    "ts": 1735668123456,
+    "deviceId": "LITE3-001",
     "type": "inspection_result",
     "payload": {
-        "device_id": "LITE3-001",
-        "waypoint_id": "WP001",
-        "timestamp": 1234567890.0,
         "defect_type": "crack",
         "subtype": "longitudinal",
+        "location": {
+            "image_x": 120,
+            "image_y": 340,
+            "world_x": 0.82,
+            "world_y": 1.10,
+            "world_theta": 0.52
+        },
         "measurements": {
             "width_mm": 0.12,
-            "length_mm": 45.2
+            "length_mm": 23.4,
+            "pixel_precision": 0.019,
+            "zoom_level": 10
         },
         "confidence": 0.92,
-        "temperature": {
-            "value": 46.5,
-            "status": "WARN"
+        "snapshot_url": "http://192.168.1.103:8080/snap/CRACK-WP001.jpg",
+        "waypoint_id": "WP001",
+        "ptz_state": {
+            "yaw": 45.0,
+            "pitch": -30.0,
+            "zoom": 10
         }
     }
 }
 ```
+
+**消息类型**:
+| type | 说明 |
+|------|------|
+| `inspection_result` | 巡检结果上报 |
+| `temperature_alert` | 温度告警上报 |
+| `crack_alert` | 裂缝告警上报 |
+| `system_status` | 系统状态上报 |
+| `heartbeat` | 心跳包 |
 
 #### UDP运动控制指令
 
