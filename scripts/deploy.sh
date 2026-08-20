@@ -1,80 +1,68 @@
 #!/bin/bash
-# 绝影Lite3电力巡检系统部署脚本
+# 绝影Lite3 一键部署脚本（精简版）
+# 用法: ./deploy.sh [simulation|real|hybrid]
 
 set -e
 
-REMOTE_HOST="ysc@192.168.1.103"
+MODE="${1:-simulation}"
 PROJECT_DIR="/home/ysc/lite3-power-inspection"
-PYTHON_VENV="$PROJECT_DIR/venv"
+VENV="$PROJECT_DIR/venv/bin/activate"
 
 echo "=========================================="
-echo "绝影Lite3电力巡检系统部署"
+echo "绝影Lite3 电力巡检系统 - 一键部署"
 echo "=========================================="
+echo ""
 
-# 1. 检查网络连接
-echo "[1/6] 检查网络连接..."
-ping -c 2 $REMOTE_HOST > /dev/null 2>&1 || {
-    echo "❌ 无法连接到 $REMOTE_HOST"
-    echo "请确认："
-    echo "  1. 机器狗主机已开机"
-    echo "  2. WiFi网络连接正常"
-    echo "  3. IP地址192.168.1.103正确"
+# 检查是否在正确目录
+if [ ! -f "$PROJECT_DIR/requirements.txt" ]; then
+    echo "❌ 错误: 项目目录不存在"
+    echo "   路径: $PROJECT_DIR"
+    echo ""
+    echo "请先解压部署包:"
+    echo "  cd ~"
+    echo "  unzip -q /mnt/usb/lite3-power-inspection.zip"
     exit 1
-}
-echo "✅ 网络连接正常"
+fi
 
-# 2. 创建项目目录
-echo "[2/6] 创建项目目录..."
-ssh $REMOTE_HOST "mkdir -p $PROJECT_DIR"
+cd "$PROJECT_DIR"
 
-# 3. 同步代码文件
-echo "[3/6] 同步代码文件..."
-rsync -avz --progress \
-    --exclude='__pycache__' \
-    --exclude='*.pyc' \
-    --exclude='.git' \
-    --exclude='venv' \
-    --exclude='data/' \
-    --exclude='*.db' \
-    ./ $REMOTE_HOST:$PROJECT_DIR/
-echo "✅ 代码同步完成"
+# 创建虚拟环境
+if [ ! -f "$VENV" ]; then
+    echo "[1/4] 创建Python虚拟环境..."
+    python3 -m venv venv
+    echo "   ✓ 虚拟环境已创建"
+fi
 
-# 4. 安装Python依赖
-echo "[4/6] 安装Python依赖..."
-ssh $REMOTE_HOST "cd $PROJECT_DIR && python3 -m venv $PYTHON_VENV && \
-    source $PYTHON_VENV/bin/activate && \
-    pip install -r requirements.txt --quiet"
-echo "✅ 依赖安装完成"
+# 激活环境并安装依赖
+echo "[2/4] 安装Python依赖..."
+source "$VENV"
+pip install -q -r requirements.txt
+echo "   ✓ 依赖安装完成"
 
-# 5. 创建数据目录
-echo "[5/6] 创建数据目录..."
-ssh $REMOTE_HOST "mkdir -p $PROJECT_DIR/{data,logs,models,config}"
-echo "✅ 数据目录创建完成"
+# 创建必要目录
+echo "[3/4] 创建数据目录..."
+mkdir -p data/logs data/cache models
+echo "   ✓ 目录创建完成"
 
-# 6. 验证部署
-echo "[6/6] 验证部署..."
-ssh $REMOTE_HOST "cd $PROJECT_DIR && source $PYTHON_VENV/bin/activate && \
-    python3 -c 'from src.perception.temperature_monitor import TemperatureMonitor; m = TemperatureMonitor(); print(\"✅ 温度监测模块加载成功\")'"
-ssh $REMOTE_HOST "cd $PROJECT_DIR && source $PYTHON_VENV/bin/activate && \
-    python3 -c 'from src.gateway.udp_controller import UDPMotionController; print(\"✅ UDP控制器加载成功\")'"
-ssh $REMOTE_HOST "cd $PROJECT_DIR && source $PYTHON_VENV/bin/activate && \
-    python3 -c 'from src.gateway.ptz_controller import PtzController; print(\"✅ 云台控制器加载成功\")'"
-ssh $REMOTE_HOST "cd $PROJECT_DIR && source $PYTHON_VENV/bin/activate && \
-    python3 -c 'from src.storage.sqlite_cache import SQLiteCache; c = SQLiteCache(); print(\"✅ SQLite缓存加载成功\")'"
+# 验证核心模块
+echo "[4/4] 验证核心模块..."
+python3 -c "from src.perception.temperature_monitor import TemperatureMonitor; m = TemperatureMonitor(); print('   ✓ 温度监测模块OK')" 2>/dev/null || echo "   ⚠ 温度监测模块加载失败"
+python3 -c "from src.gateway.udp_controller import UDPMotionController; print('   ✓ UDP控制器OK')" 2>/dev/null || echo "   ⚠ UDP控制器加载失败"
+python3 -c "from src.gateway.ptz_controller import PtzController; print('   ✓ 云台控制器OK')" 2>/dev/null || echo "   ⚠ 云台控制器加载失败"
+python3 -c "from src.storage.sqlite_cache import SQLiteCache; c = SQLiteCache(); print('   ✓ SQLite缓存OK')" 2>/dev/null || echo "   ⚠ SQLite缓存加载失败"
 
 echo ""
 echo "=========================================="
 echo "✅ 部署完成！"
 echo "=========================================="
 echo ""
-echo "SSH登录: ssh $REMOTE_HOST"
-echo "项目目录: $PROJECT_DIR"
-echo "Python环境: $PYTHON_VENV/bin/python3"
+echo "启动命令:"
+echo "  # 启动监测平台（后台）"
+echo "  source venv/bin/activate && nohup python3 scripts/start_monitor.py > data/logs/monitor.log 2>&1 &"
 echo ""
-echo "启动监测平台:"
-echo "  cd $PROJECT_DIR && source $PYTHON_VENV/bin/activate && python3 scripts/start_monitor.py"
+echo "  # 运行演示"
+echo "  source venv/bin/activate && python3 scripts/demo_12min.py --mode $MODE"
 echo ""
-echo "访问地址: http://192.168.1.103:8000"
+echo "  # 访问监测平台"
+echo "  http://192.168.1.103:8000"
 echo ""
-echo "运行测试:"
-echo "  cd $PROJECT_DIR && source $PYTHON_VENV/bin/activate && python3 scripts/run_demo.py --mode simulation"

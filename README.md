@@ -60,28 +60,24 @@
 ### 2.2 一键部署（推荐）
 
 ```bash
-# SSH登录感知主机（Jetson NX）
+# 1. 传输部署包到机器狗主机
+scp lite3-power-inspection.zip ysc@192.168.1.103:/home/ysc/
+
+# 2. SSH登录并一键部署
 ssh ysc@192.168.1.103
-# 密码: '
+cd ~ && mkdir -p lite3-power-inspection && cd lite3-power-inspection
+unzip -q ../lite3-power-inspection.zip
+python3 -m venv venv && source venv/bin/activate
+pip install -q -r requirements.txt
 
-# 进入项目目录
-cd /home/ysc/lite3-power-inspection
+# 3. 启动监测平台（后台）
+nohup python3 scripts/start_monitor.py > data/logs/monitor.log 2>&1 &
 
-# 运行环境诊断（生成三份报告）
-./scripts/run_diagnostic.sh
-
-# 根据诊断结果安装依赖
-# 模拟模式（无需GPU）：
-pip install -r requirements.txt
-# 真实模式（需要GPU）：
-pip install -r requirements-gpu.txt
-
-# 运行快速检查
-./scripts/check_deployment.sh
-
-# 启动12分钟演示
+# 4. 运行12分钟演示
 python3 scripts/demo_12min.py --mode simulation
 ```
+
+**访问地址**: http://192.168.1.103:8000
 
 ### 2.3 分步部署
 

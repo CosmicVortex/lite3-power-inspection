@@ -377,39 +377,39 @@ def generate_html_report(result, output_path):
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>绝影Lite3 环境诊断报告</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; padding: 20px; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: white; padding: 30px; border-radius: 12px; margin-bottom: 20px; }
-        .header h1 { font-size: 28px; margin-bottom: 10px; }
-        .header .timestamp { opacity: 0.8; font-size: 14px; }
-        .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
-        .summary-card { background: white; padding: 20px; border-radius: 12px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        .summary-card.pass { border-left: 4px solid #22c55e; }
-        .summary-card.warn { border-left: 4px solid #f59e0b; }
-        .summary-card.fail { border-left: 4px solid #ef4444; }
-        .summary-card.info { border-left: 4px solid #3b82f6; }
-        .summary-card .count { font-size: 36px; font-weight: bold; }
-        .summary-card.pass .count { color: #22c55e; }
-        .summary-card.warn .count { color: #f59e0b; }
-        .summary-card.fail .count { color: #ef4444; }
-        .summary-card.info .count { color: #3b82f6; }
-        .summary-card .label { font-size: 14px; color: #666; margin-top: 5px; }
-        .section { background: white; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        .section h2 { font-size: 18px; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #e5e7eb; }
-        .item { padding: 12px; border-bottom: 1px solid #f3f4f6; display: flex; justify-content: space-between; align-items: flex-start; }
-        .item:last-child { border-bottom: none; }
-        .item-header { display: flex; align-items: center; gap: 10px; }
-        .item-category { font-size: 12px; color: #666; background: #f3f4f6; padding: 2px 8px; border-radius: 4px; }
-        .item-name { font-weight: 500; }
-        .item-status { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; }
-        .item-status.pass { background: #dcfce7; color: #166534; }
-        .item-status.warn { background: #fef3c7; color: #92400e; }
-        .item-status.fail { background: #fee2e2; color: #991b1b; }
-        .item-status.info { background: #dbeafe; color: #1e40af; }
-        .item-detail { font-size: 13px; color: #666; margin-top: 5px; }
-        .item-suggestion { font-size: 12px; color: #f59e0b; margin-top: 5px; }
-        .footer { text-align: center; color: #666; font-size: 12px; margin-top: 30px; }
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; padding: 20px; }}
+        .container {{ max-width: 1200px; margin: 0 auto; }}
+        .header {{ background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: white; padding: 30px; border-radius: 12px; margin-bottom: 20px; }}
+        .header h1 {{ font-size: 28px; margin-bottom: 10px; }}
+        .header .timestamp {{ opacity: 0.8; font-size: 14px; }}
+        .summary {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }}
+        .summary-card {{ background: white; padding: 20px; border-radius: 12px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }}
+        .summary-card.pass {{ border-left: 4px solid #22c55e; }}
+        .summary-card.warn {{ border-left: 4px solid #f59e0b; }}
+        .summary-card.fail {{ border-left: 4px solid #ef4444; }}
+        .summary-card.info {{ border-left: 4px solid #3b82f6; }}
+        .summary-card .count {{ font-size: 36px; font-weight: bold; }}
+        .summary-card.pass .count {{ color: #22c55e; }}
+        .summary-card.warn .count {{ color: #f59e0b; }}
+        .summary-card.fail .count {{ color: #ef4444; }}
+        .summary-card.info .count {{ color: #3b82f6; }}
+        .summary-card .label {{ font-size: 14px; color: #666; margin-top: 5px; }}
+        .section {{ background: white; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }}
+        .section h2 {{ font-size: 18px; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #e5e7eb; }}
+        .item {{ padding: 12px; border-bottom: 1px solid #f3f4f6; display: flex; justify-content: space-between; align-items: flex-start; }}
+        .item:last-child {{ border-bottom: none; }}
+        .item-header {{ display: flex; align-items: center; gap: 10px; }}
+        .item-category {{ font-size: 12px; color: #666; background: #f3f4f6; padding: 2px 8px; border-radius: 4px; }}
+        .item-name {{ font-weight: 500; }}
+        .item-status {{ padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; }}
+        .item-status.pass {{ background: #dcfce7; color: #166534; }}
+        .item-status.warn {{ background: #fef3c7; color: #92400e; }}
+        .item-status.fail {{ background: #fee2e2; color: #991b1b; }}
+        .item-status.info {{ background: #dbeafe; color: #1e40af; }}
+        .item-detail {{ font-size: 13px; color: #666; margin-top: 5px; }}
+        .item-suggestion {{ font-size: 12px; color: #f59e0b; margin-top: 5px; }}
+        .footer {{ text-align: center; color: #666; font-size: 12px; margin-top: 30px; }}
     </style>
 </head>
 <body>
