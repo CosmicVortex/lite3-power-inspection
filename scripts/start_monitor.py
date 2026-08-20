@@ -17,8 +17,15 @@
 
 import sys
 import asyncio
+import logging
 from pathlib import Path
-from loguru import logger
+
+# 配置标准logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # 添加项目根目录到路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -29,13 +36,10 @@ def check_dependencies():
     logger.info("检查Python依赖...")
     
     required = {
-        "loguru": "日志管理",
         "fastapi": "Web框架",
         "uvicorn": "ASGI服务器",
         "websockets": "WebSocket通信",
         "pydantic": "数据验证",
-        "requests": "HTTP请求",
-        "yaml": "配置解析",
     }
     
     missing = []

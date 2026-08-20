@@ -122,6 +122,31 @@ class MonitorServer:
                 "timestamp": timestamp
             }))
         
+        elif msg_type == "crack_alert":
+            # 存储裂缝告警
+            alert = {
+                "id": f"CRACK_ALT_{int(timestamp * 1000)}",
+                "type": "crack",
+                "level": "WARNING",
+                "timestamp": timestamp,
+                "datetime": datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S"),
+                "device_id": device_id,
+                "data": payload
+            }
+            alerts.append(alert)
+            
+            # 广播告警
+            await self.broadcast({
+                "type": "crack_alert",
+                "data": alert
+            })
+            
+            logger.warning(f"收到裂缝告警: {payload.get('width_mm')}mm")
+        
+        elif msg_type == "system_status":
+            # 处理系统状态（静默处理，仅记录日志）
+            logger.debug(f"收到系统状态: {payload.get('status', 'unknown')}")
+        
         else:
             await websocket.send(json.dumps({
                 "type": "error",
