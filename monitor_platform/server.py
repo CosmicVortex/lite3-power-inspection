@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-绝影Lite3 监测平台 - 实时数据面板版
+绝影Lite3 监测平台 - 设计稿还原版
 """
 
 import asyncio, json, time, logging, struct, socket
@@ -79,9 +79,6 @@ async def status():
 @app.get("/api/robot")
 async def get_robot(): return robot_status
 
-@app.get("/api/inspections")
-async def get_inspections(limit: int = 50): return inspections[-limit:]
-
 @app.post("/api/demo")
 async def demo():
     import random
@@ -108,7 +105,6 @@ async def demo():
 
 class Monitor:
     async def process(self, data: Dict, ws: WebSocket):
-        t = time.time()
         p = data.get("payload", data.get("data", {}))
         if data.get("type") == "system_status":
             for k in ["battery","cpu_temp","gpu_load","memory_usage","status","waypoint","position","endurance_hours"]:
@@ -128,74 +124,86 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: #f5f7fa;
-    color: #333;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background: #f0f2f5;
+    color: #1a1a1a;
     min-height: 100vh;
 }
 
 /* 顶部导航 */
-.navbar {
+.topbar {
     background: #fff;
-    border-bottom: 1px solid #e5e7eb;
+    border-bottom: 1px solid #e8e8e8;
     padding: 0 24px;
     height: 56px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    position: sticky;
+    top: 0;
+    z-index: 100;
 }
 
-.navbar-brand {
+.topbar-left {
     display: flex;
     align-items: center;
     gap: 12px;
-    font-size: 18px;
-    font-weight: 600;
-    color: #111827;
 }
 
-.navbar-brand .logo {
+.topbar-logo {
     width: 32px;
     height: 32px;
-    background: linear-gradient(135deg, #3b82f6, #8b5cf6);
-    border-radius: 8px;
+    background: linear-gradient(135deg, #1890ff, #096dd9);
+    border-radius: 6px;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: white;
+    color: #fff;
     font-size: 16px;
 }
 
-.navbar-status {
+.topbar-title {
+    font-size: 16px;
+    font-weight: 500;
+    color: #1a1a1a;
+}
+
+.topbar-right {
     display: flex;
     align-items: center;
     gap: 20px;
     font-size: 13px;
-    color: #6b7280;
+    color: #666;
+}
+
+.status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .status-dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #d1d5db;
+    background: #d9d9d9;
     transition: all 0.3s;
 }
 
-.status-dot.connected {
-    background: #10b981;
-    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+.status-dot.online {
+    background: #52c41a;
+    box-shadow: 0 0 0 3px rgba(82, 196, 26, 0.15);
 }
 
-/* 主内容区 */
-.main-content {
+/* 页面主体 */
+.page-container {
     max-width: 1400px;
     margin: 0 auto;
     padding: 24px;
 }
 
-/* 实时数据面板标题 */
+/* 章节标题 */
 .section-header {
     display: flex;
     align-items: center;
@@ -209,48 +217,48 @@ body {
     gap: 10px;
     font-size: 16px;
     font-weight: 600;
-    color: #111827;
+    color: #1a1a1a;
 }
 
 .section-title::before {
     content: '';
     width: 4px;
-    height: 20px;
-    background: linear-gradient(180deg, #3b82f6, #8b5cf6);
+    height: 18px;
+    background: linear-gradient(180deg, #1890ff, #096dd9);
     border-radius: 2px;
 }
 
 .refresh-btn {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     padding: 6px 12px;
-    background: #f3f4f6;
-    border: 1px solid #e5e7eb;
-    border-radius: 6px;
+    background: #fafafa;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
     font-size: 13px;
-    color: #6b7280;
+    color: #666;
     cursor: pointer;
     transition: all 0.2s;
 }
 
 .refresh-btn:hover {
-    background: #e5e7eb;
-    color: #374151;
+    border-color: #1890ff;
+    color: #1890ff;
 }
 
-/* 机器人卡片 */
-.robot-card {
+/* 机器人信息卡片 */
+.robot-info-card {
     background: #fff;
-    border-radius: 12px;
-    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    border: 1px solid #e8e8e8;
     overflow: hidden;
     margin-bottom: 24px;
 }
 
-.robot-card-header {
+.robot-info-header {
     padding: 16px 20px;
-    border-bottom: 1px solid #f3f4f6;
+    border-bottom: 1px solid #f0f0f0;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -259,84 +267,90 @@ body {
 .robot-name {
     font-size: 15px;
     font-weight: 600;
-    color: #111827;
+    color: #1a1a1a;
 }
 
-.status-badge {
+.status-tag {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 4px 10px;
-    background: #dcfce7;
-    color: #166534;
+    padding: 4px 12px;
+    background: #f6ffed;
+    border: 1px solid #b7eb8f;
     border-radius: 20px;
     font-size: 12px;
-    font-weight: 500;
+    color: #52c41a;
 }
 
-.status-badge.offline {
-    background: #fee2e2;
-    color: #991b1b;
+.status-tag.offline {
+    background: #fff2f0;
+    border-color: #ffa39e;
+    color: #ff4d4f;
 }
 
-.robot-card-body {
+.robot-info-body {
     display: grid;
-    grid-template-columns: 120px 1fr;
-    gap: 0;
+    grid-template-columns: 140px 1fr;
 }
 
 .robot-image {
-    width: 120px;
-    height: 120px;
-    background: linear-gradient(135deg, #f3f4f6, #e5e7eb);
+    width: 140px;
+    height: 140px;
+    background: linear-gradient(135deg, #f5f5f5, #ebebeb);
     display: flex;
     align-items: center;
     justify-content: center;
-    border-right: 1px solid #f3f4f6;
+    border-right: 1px solid #f0f0f0;
 }
 
 .robot-image img {
-    max-width: 100%;
-    max-height: 100%;
+    max-width: 90%;
+    max-height: 90%;
     object-fit: contain;
 }
 
 .robot-image .placeholder {
-    font-size: 48px;
+    font-size: 64px;
     opacity: 0.3;
 }
 
-.robot-info {
+.robot-details {
     padding: 20px;
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 20px;
+    gap: 24px;
 }
 
-.info-item {
+.detail-item {
     display: flex;
     flex-direction: column;
     gap: 8px;
 }
 
-.info-label {
+.detail-label {
     font-size: 12px;
-    color: #6b7280;
+    color: #8c8c8c;
     font-weight: 500;
 }
 
-.info-value {
+.detail-value {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.battery-widget {
     display: flex;
     align-items: center;
     gap: 8px;
 }
 
 .battery-icon {
-    width: 20px;
-    height: 12px;
-    border: 2px solid #10b981;
-    border-radius: 2px;
     position: relative;
+    width: 24px;
+    height: 12px;
+    border: 2px solid #52c41a;
+    border-radius: 2px;
     display: flex;
     align-items: center;
     padding: 1px;
@@ -345,33 +359,34 @@ body {
 .battery-icon::after {
     content: '';
     position: absolute;
-    right: -4px;
-    width: 3px;
+    right: -5px;
+    width: 4px;
     height: 6px;
-    background: #10b981;
+    background: #52c41a;
     border-radius: 0 1px 1px 0;
 }
 
-.battery-fill {
+.battery-level {
     height: 100%;
-    background: #10b981;
+    background: #52c41a;
     border-radius: 1px;
     transition: width 0.5s;
 }
 
-.info-number {
-    font-size: 20px;
+.detail-number {
+    font-size: 22px;
     font-weight: 600;
-    color: #111827;
+    color: #1a1a1a;
+    line-height: 1;
 }
 
-.info-unit {
+.detail-unit {
     font-size: 13px;
-    color: #6b7280;
+    color: #8c8c8c;
 }
 
 /* 统计卡片 */
-.stats-grid {
+.stats-row {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 16px;
@@ -380,15 +395,15 @@ body {
 
 .stat-card {
     background: #fff;
-    border-radius: 12px;
-    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    border: 1px solid #e8e8e8;
     padding: 20px;
     transition: all 0.2s;
 }
 
 .stat-card:hover {
-    border-color: #3b82f6;
-    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.1);
+    border-color: #1890ff;
+    box-shadow: 0 2px 8px rgba(24, 144, 255, 0.1);
 }
 
 .stat-icon {
@@ -396,120 +411,113 @@ body {
     margin-bottom: 12px;
 }
 
-.stat-value {
-    font-size: 28px;
+.stat-number {
+    font-size: 32px;
     font-weight: 700;
-    color: #111827;
+    color: #1a1a1a;
     line-height: 1;
 }
 
 .stat-label {
     font-size: 13px;
-    color: #6b7280;
+    color: #8c8c8c;
     margin-top: 8px;
 }
 
-/* 表格 */
-.table-card {
+/* 主内容布局 */
+.main-layout {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: 24px;
+}
+
+/* 面板 */
+.panel {
     background: #fff;
-    border-radius: 12px;
-    border: 1px solid #e5e7eb;
-    overflow: hidden;
-}
-
-.table-header {
-    padding: 16px 20px;
-    border-bottom: 1px solid #f3f4f6;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.table-title {
-    font-size: 15px;
-    font-weight: 600;
-    color: #111827;
-}
-
-.table-wrap {
-    max-height: 320px;
-    overflow-y: auto;
-}
-
-table {
-    width: 100%;
-    border-collapse: collapse;
-}
-
-th {
-    background: #f9fafb;
-    padding: 12px 16px;
-    text-align: left;
-    font-size: 12px;
-    font-weight: 600;
-    color: #6b7280;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    border-bottom: 1px solid #e5e7eb;
-}
-
-td {
-    padding: 12px 16px;
-    font-size: 13px;
-    color: #374151;
-    border-bottom: 1px solid #f3f4f6;
-}
-
-tr:hover td {
-    background: #f9fafb;
-}
-
-.badge {
-    display: inline-block;
-    padding: 3px 10px;
-    border-radius: 12px;
-    font-size: 11px;
-    font-weight: 500;
-}
-
-.badge-success { background: #dcfce7; color: #166534; }
-.badge-warning { background: #fef3c7; color: #92400e; }
-.badge-danger { background: #fee2e2; color: #991b1b; }
-
-/* 空状态 */
-.empty-state {
-    text-align: center;
-    padding: 40px;
-    color: #9ca3af;
-}
-
-/* 右侧控制面板 */
-.right-panel {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-}
-
-.control-panel {
-    background: #fff;
-    border-radius: 12px;
-    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    border: 1px solid #e8e8e8;
     overflow: hidden;
 }
 
 .panel-header {
     padding: 14px 16px;
-    border-bottom: 1px solid #f3f4f6;
+    border-bottom: 1px solid #f0f0f0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.panel-title {
     font-size: 14px;
     font-weight: 600;
-    color: #111827;
+    color: #1a1a1a;
 }
 
 .panel-body {
     padding: 16px;
 }
 
-/* 控制按钮网格 */
+/* 表格 */
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.data-table th {
+    background: #fafafa;
+    padding: 12px 16px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 600;
+    color: #8c8c8c;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.data-table td {
+    padding: 12px 16px;
+    font-size: 13px;
+    color: #595959;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.data-table tr:hover td {
+    background: #fafafa;
+}
+
+.tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 2px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.tag-success { background: #f6ffed; color: #52c41a; border: 1px solid #b7eb8f; }
+.tag-warning { background: #fffbe6; color: #faad14; border: 1px solid #ffe58f; }
+.tag-error { background: #fff2f0; color: #ff4d4f; border: 1px solid #ffa39e; }
+
+/* 视频区域 */
+.video-placeholder {
+    background: #fafafa;
+    border: 1px dashed #d9d9d9;
+    border-radius: 4px;
+    padding: 32px;
+    text-align: center;
+    color: #8c8c8c;
+}
+
+.video-placeholder .icon {
+    font-size: 36px;
+    margin-bottom: 8px;
+    opacity: 0.5;
+}
+
+.video-placeholder .info {
+    font-size: 12px;
+    color: #bfbfbf;
+}
+
+/* 控制按钮 */
 .control-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -518,52 +526,55 @@ tr:hover td {
 }
 
 .ctrl-btn {
-    padding: 12px 8px;
-    background: #f3f4f6;
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
+    padding: 14px 8px;
+    background: #fafafa;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
     cursor: pointer;
     transition: all 0.2s;
     text-align: center;
 }
 
 .ctrl-btn:hover {
-    background: #e5e7eb;
-    border-color: #d1d5db;
+    border-color: #1890ff;
+    color: #1890ff;
+    background: #e6f7ff;
 }
 
 .ctrl-btn .icon {
-    font-size: 18px;
+    font-size: 20px;
     display: block;
     margin-bottom: 4px;
 }
 
 .ctrl-btn .label {
     font-size: 10px;
-    color: #6b7280;
+    color: #8c8c8c;
 }
 
 .ctrl-btn.primary {
-    background: #3b82f6;
-    border-color: #3b82f6;
-    color: white;
+    background: #1890ff;
+    border-color: #1890ff;
+    color: #fff;
 }
 
 .ctrl-btn.primary:hover {
-    background: #2563eb;
+    background: #40a9ff;
+    border-color: #40a9ff;
 }
 
 .ctrl-btn.danger {
-    background: #ef4444;
-    border-color: #ef4444;
-    color: white;
+    background: #ff4d4f;
+    border-color: #ff4d4f;
+    color: #fff;
 }
 
 .ctrl-btn.danger:hover {
-    background: #dc2626;
+    background: #ff7875;
+    border-color: #ff7875;
 }
 
-.action-btns {
+.action-buttons {
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -571,12 +582,12 @@ tr:hover td {
 
 .action-btn {
     padding: 10px 12px;
-    background: #f3f4f6;
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
+    background: #fafafa;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
     cursor: pointer;
     font-size: 13px;
-    color: #374151;
+    color: #595959;
     text-align: left;
     transition: all 0.2s;
     display: flex;
@@ -585,15 +596,16 @@ tr:hover td {
 }
 
 .action-btn:hover {
-    background: #e5e7eb;
+    border-color: #1890ff;
+    color: #1890ff;
 }
 
-.action-btn.up { border-left: 3px solid #10b981; }
-.action-btn.down { border-left: 3px solid #f59e0b; }
-.action-btn.emergency { border-left: 3px solid #ef4444; color: #ef4444; }
+.action-btn.up { border-left: 3px solid #52c41a; }
+.action-btn.down { border-left: 3px solid #faad14; }
+.action-btn.emergency { border-left: 3px solid #ff4d4f; color: #ff4d4f; }
 
 /* 演示按钮 */
-.demo-btns {
+.demo-buttons {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 8px;
@@ -601,81 +613,85 @@ tr:hover td {
 
 .demo-btn {
     padding: 10px;
-    background: #f3f4f6;
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
+    background: #fafafa;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
     cursor: pointer;
     font-size: 12px;
-    color: #374151;
+    color: #595959;
     transition: all 0.2s;
 }
 
 .demo-btn:hover {
-    background: #e5e7eb;
+    border-color: #722ed1;
+    color: #722ed1;
+    background: #f9f0ff;
 }
 
 /* 告警列表 */
 .alert-list {
-    max-height: 180px;
+    max-height: 200px;
     overflow-y: auto;
 }
 
 .alert-item {
     padding: 10px 12px;
-    border-radius: 6px;
     margin-bottom: 6px;
+    border-radius: 4px;
     border-left: 3px solid;
-    background: #f9fafb;
+    background: #fafafa;
+    font-size: 12px;
 }
 
-.alert-item.warn { border-color: #f59e0b; }
-.alert-item.critical { border-color: #ef4444; }
-.alert-item.crack { border-color: #8b5cf6; }
+.alert-item.warn { border-color: #faad14; }
+.alert-item.critical { border-color: #ff4d4f; }
+.alert-item.crack { border-color: #722ed1; }
 
 .alert-content {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-size: 12px;
 }
 
-.alert-text { color: #374151; }
-.alert-time { color: #9ca3af; }
+.alert-text { color: #595959; }
+.alert-time { color: #bfbfbf; font-size: 11px; }
 
-/* 布局 */
-.layout {
-    display: grid;
-    grid-template-columns: 1fr 360px;
-    gap: 24px;
+/* 空状态 */
+.empty-state {
+    text-align: center;
+    padding: 40px;
+    color: #bfbfbf;
 }
 
+/* 响应式 */
 @media (max-width: 1200px) {
-    .layout { grid-template-columns: 1fr; }
-    .robot-card-body { grid-template-columns: 1fr; }
-    .robot-image { width: 100%; height: 160px; border-right: none; border-bottom: 1px solid #f3f4f6; }
+    .main-layout { grid-template-columns: 1fr; }
+    .robot-info-body { grid-template-columns: 1fr; }
+    .robot-image { width: 100%; height: 160px; border-right: none; border-bottom: 1px solid #f0f0f0; }
+    .robot-details { grid-template-columns: repeat(2, 1fr); }
 }
 </style>
 </head>
 <body>
-    <!-- 导航栏 -->
-    <nav class="navbar">
-        <div class="navbar-brand">
-            <div class="logo">🤖</div>
-            <span>绝影Lite3 监测平台</span>
+    <!-- 顶部导航 -->
+    <div class="topbar">
+        <div class="topbar-left">
+            <div class="topbar-logo">🤖</div>
+            <span class="topbar-title">绝影Lite3 监测平台</span>
         </div>
-        <div class="navbar-status">
-            <div class="status-item">
+        <div class="topbar-right">
+            <div class="status-indicator">
                 <div class="status-dot" id="connDot"></div>
                 <span id="connStatus">未连接</span>
             </div>
-            <div class="status-item">📡 <span id="clientCount">0</span> 在线</div>
-            <div class="status-item">🕐 <span id="currentTime">--:--:--</span></div>
+            <div class="status-indicator">📡 <span id="clientCount">0</span> 在线</div>
+            <div class="status-indicator">🕐 <span id="currentTime">--:--:--</span></div>
         </div>
-    </nav>
+    </div>
 
-    <!-- 主内容 -->
-    <div class="main-content">
-        <!-- 实时数据标题 -->
+    <!-- 页面主体 -->
+    <div class="page-container">
+        <!-- 章节标题 -->
         <div class="section-header">
             <div class="section-title">实时数据</div>
             <button class="refresh-btn" onclick="refreshData()">
@@ -683,100 +699,103 @@ tr:hover td {
             </button>
         </div>
 
-        <div class="layout">
+        <!-- 机器人信息卡片 -->
+        <div class="robot-info-card">
+            <div class="robot-info-header">
+                <div class="robot-name">机器狗 #02</div>
+                <div class="status-tag" id="onlineTag">
+                    <span>●</span> 在线
+                </div>
+            </div>
+            <div class="robot-info-body">
+                <div class="robot-image">
+                    <div class="placeholder">🐕</div>
+                </div>
+                <div class="robot-details">
+                    <div class="detail-item">
+                        <div class="detail-label">电量</div>
+                        <div class="detail-value">
+                            <div class="battery-widget">
+                                <div class="battery-icon">
+                                    <div class="battery-level" id="batteryLevel" style="width:68%"></div>
+                                </div>
+                                <span class="detail-number" id="batteryValue">68%</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">预估续航</div>
+                        <div class="detail-value">
+                            <span class="detail-number" id="enduranceValue">1.8</span>
+                            <span class="detail-unit">h</span>
+                        </div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">CPU温度</div>
+                        <div class="detail-value">
+                            <span class="detail-number" id="cpuTempValue">35.0</span>
+                            <span class="detail-unit">℃</span>
+                        </div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">GPU负载</div>
+                        <div class="detail-value">
+                            <span class="detail-number" id="gpuLoadValue">0</span>
+                            <span class="detail-unit">%</span>
+                        </div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">运行状态</div>
+                        <div class="detail-value">
+                            <span class="detail-number" id="statusValue" style="font-size:16px">待机</span>
+                        </div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">当前位置</div>
+                        <div class="detail-value">
+                            <span class="detail-number" id="positionValue" style="font-size:14px">(0.0, 0.0)</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 统计卡片 -->
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="stat-icon">📊</div>
+                <div class="stat-number" id="totalInspections">0</div>
+                <div class="stat-label">总巡检次数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">✅</div>
+                <div class="stat-number" id="normalCount">0</div>
+                <div class="stat-label">正常检测</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">🔍</div>
+                <div class="stat-number" id="crackCount">0</div>
+                <div class="stat-label">裂缝检测</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">⚠️</div>
+                <div class="stat-number" id="alertCount">0</div>
+                <div class="stat-label">待处理告警</div>
+            </div>
+        </div>
+
+        <!-- 主内容布局 -->
+        <div class="main-layout">
             <!-- 左侧 -->
             <div class="left-column">
-                <!-- 机器人卡片 -->
-                <div class="robot-card">
-                    <div class="robot-card-header">
-                        <div class="robot-name">机器狗 #02</div>
-                        <div class="status-badge" id="onlineBadge">
-                            <span>●</span> 在线
-                        </div>
-                    </div>
-                    <div class="robot-card-body">
-                        <div class="robot-image">
-                            <div class="placeholder">🤖</div>
-                        </div>
-                        <div class="robot-info">
-                            <div class="info-item">
-                                <div class="info-label">电量</div>
-                                <div class="info-value">
-                                    <div class="battery-icon">
-                                        <div class="battery-fill" id="batteryFill" style="width:68%"></div>
-                                    </div>
-                                    <span class="info-number" id="batteryValue">68%</span>
-                                </div>
-                            </div>
-                            <div class="info-item">
-                                <div class="info-label">预估续航</div>
-                                <div class="info-value">
-                                    <span class="info-number" id="enduranceValue">1.8</span>
-                                    <span class="info-unit">h</span>
-                                </div>
-                            </div>
-                            <div class="info-item">
-                                <div class="info-label">CPU温度</div>
-                                <div class="info-value">
-                                    <span class="info-number" id="cpuTempValue">35.0</span>
-                                    <span class="info-unit">℃</span>
-                                </div>
-                            </div>
-                            <div class="info-item">
-                                <div class="info-label">GPU负载</div>
-                                <div class="info-value">
-                                    <span class="info-number" id="gpuLoadValue">0</span>
-                                    <span class="info-unit">%</span>
-                                </div>
-                            </div>
-                            <div class="info-item">
-                                <div class="info-label">运行状态</div>
-                                <div class="info-value">
-                                    <span class="info-number" id="statusValue" style="font-size:16px">待机</span>
-                                </div>
-                            </div>
-                            <div class="info-item">
-                                <div class="info-label">当前位置</div>
-                                <div class="info-value">
-                                    <span class="info-number" id="positionValue" style="font-size:14px">(0.0, 0.0)</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 统计卡片 -->
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-icon">📊</div>
-                        <div class="stat-value" id="totalInspections">0</div>
-                        <div class="stat-label">总巡检次数</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon">✅</div>
-                        <div class="stat-value" id="normalCount">0</div>
-                        <div class="stat-label">正常检测</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon">🔍</div>
-                        <div class="stat-value" id="crackCount">0</div>
-                        <div class="stat-label">裂缝检测</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon">⚠️</div>
-                        <div class="stat-value" id="alertCount">0</div>
-                        <div class="stat-label">待处理告警</div>
-                    </div>
-                </div>
-
                 <!-- 巡检记录表格 -->
-                <div class="table-card">
-                    <div class="table-header">
-                        <div class="table-title">最近巡检记录</div>
-                        <span style="font-size:12px;color:#6b7280" id="inspectionTime">--:--:--</span>
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title">最近巡检记录</div>
+                        <span style="font-size:12px;color:#8c8c8c" id="inspectionTime">--:--:--</span>
                     </div>
-                    <div class="table-wrap">
-                        <table>
+                    <div class="panel-body" style="padding:0">
+                        <table class="data-table">
                             <thead>
                                 <tr>
                                     <th>时间</th>
@@ -793,13 +812,29 @@ tr:hover td {
                         </table>
                     </div>
                 </div>
+
+                <!-- 视频流 -->
+                <div class="panel" style="margin-top:16px">
+                    <div class="panel-header">
+                        <div class="panel-title">实时视频流</div>
+                    </div>
+                    <div class="panel-body">
+                        <div class="video-placeholder">
+                            <div class="icon">📹</div>
+                            <div>视频流暂未连接</div>
+                            <div class="info" style="margin-top:8px">RTSP: rtsp://192.168.1.108:554/id=1&type=0</div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- 右侧控制面板 -->
-            <div class="right-panel">
+            <div class="right-column">
                 <!-- 运动控制 -->
-                <div class="control-panel">
-                    <div class="panel-header">运动控制</div>
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title">运动控制</div>
+                    </div>
                     <div class="panel-body">
                         <div class="control-grid">
                             <button class="ctrl-btn" onclick="sendCmd('rotate_left')">
@@ -831,7 +866,7 @@ tr:hover td {
                                 <span class="label">后退</span>
                             </button>
                         </div>
-                        <div class="action-btns">
+                        <div class="action-buttons">
                             <button class="action-btn up" onclick="sendCmd('stand_up')">⬆ 起立</button>
                             <button class="action-btn down" onclick="sendCmd('stand_down')">⬇ 趴下</button>
                             <button class="action-btn emergency" onclick="sendCmd('emergency_stop')">🛑 急停</button>
@@ -840,10 +875,12 @@ tr:hover td {
                 </div>
 
                 <!-- 演示控制 -->
-                <div class="control-panel">
-                    <div class="panel-header">演示控制</div>
+                <div class="panel" style="margin-top:16px">
+                    <div class="panel-header">
+                        <div class="panel-title">演示控制</div>
+                    </div>
                     <div class="panel-body">
-                        <div class="demo-btns">
+                        <div class="demo-buttons">
                             <button class="demo-btn" onclick="sendDemo()">📊 发送巡检数据</button>
                             <button class="demo-btn" onclick="sendDemoStatus()">🔄 更新状态</button>
                         </div>
@@ -851,10 +888,9 @@ tr:hover td {
                 </div>
 
                 <!-- 实时告警 -->
-                <div class="control-panel">
+                <div class="panel" style="margin-top:16px">
                     <div class="panel-header">
-                        实时告警
-                        <span style="color:#ef4444;font-size:12px;margin-left:auto" id="alertBadge">0</span>
+                        <div class="panel-title">实时告警 <span style="color:#ff4d4f;font-size:12px;margin-left:auto" id="alertBadge">0</span></div>
                     </div>
                     <div class="panel-body">
                         <div class="alert-list" id="alertList">
@@ -873,7 +909,7 @@ tr:hover td {
         function connect() {
             ws = new WebSocket('ws://' + location.host + ':8765/ws');
             ws.onopen = () => {
-                document.getElementById('connDot').className = 'status-dot connected';
+                document.getElementById('connDot').className = 'status-dot online';
                 document.getElementById('connStatus').textContent = '已连接';
             };
             ws.onmessage = (e) => {
@@ -901,17 +937,17 @@ tr:hover td {
             const tb = document.getElementById('inspectionTable');
             if (!inspections.length) { tb.innerHTML = '<tr><td colspan="6"><div class="empty-state">暂无数据</div></td></tr>'; return; }
             tb.innerHTML = inspections.map(i => {
-                const c = i.status === 'NORMAL' ? 'success' : i.status === 'WARN' ? 'warning' : 'danger';
-                return `<tr><td>${i.time}</td><td>LITE3-001</td><td>WP00${Math.floor(Math.random()*5)+1}</td><td>${i.cracks}</td><td>${i.temp}℃</td><td><span class="badge badge-${c}">${i.status}</span></td></tr>`;
+                const c = i.status === 'NORMAL' ? 'success' : i.status === 'WARN' ? 'warning' : 'error';
+                return `<tr><td>${i.time}</td><td>LITE3-001</td><td>WP00${Math.floor(Math.random()*5)+1}</td><td>${i.cracks}</td><td>${i.temp}℃</td><td><span class="tag tag-${c}">${i.status}</span></td></tr>`;
             }).join('');
         }
         
         function updateRobot(d) {
             robot = d;
             document.getElementById('batteryValue').textContent = d.battery + '%';
-            document.getElementById('batteryFill').style.width = d.battery + '%';
-            document.getElementById('enduranceValue').textContent = d.endurance_hours?.toFixed(1) || '1.8';
-            document.getElementById('cpuTempValue').textContent = d.cpu_temp?.toFixed(1) || '35.0';
+            document.getElementById('batteryLevel').style.width = d.battery + '%';
+            document.getElementById('enduranceValue').textContent = (d.endurance_hours || 1.8).toFixed(1);
+            document.getElementById('cpuTempValue').textContent = (d.cpu_temp || 35).toFixed(1);
             document.getElementById('gpuLoadValue').textContent = d.gpu_load || 0;
             const sm = { 'idle': '待机', 'moving': '运动中', 'inspecting': '巡检中' };
             document.getElementById('statusValue').textContent = sm[d.status] || d.status;
