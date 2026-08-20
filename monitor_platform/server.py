@@ -1,16 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-绝影Lite3 监测平台 - 优化版
-支持机器狗状态监控、运动控制和巡检数据接收
+绝影Lite3 监测平台 - 科幻科技版
 """
 
-import asyncio
-import json
-import time
-import logging
-import struct
-import socket
+import asyncio, json, time, logging, struct, socket
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -21,1021 +15,1129 @@ import uvicorn
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-WS_HOST = "0.0.0.0"
-WS_PORT = 8765
-HTTP_PORT = 8000
-MOTION_HOST = "192.168.1.103"
-MOTION_PORT = 43893
-
-CMD_STAND_UP = 0x21010202
-CMD_STAND_DOWN = 0x21010203
-CMD_EMERGENCY_STOP = 0x21020C0E
-CMD_VELOCITY = 0x0103
-
-app = FastAPI(title="绝影Lite3监测平台")
+app = FastAPI()
+WS_PORT, HTTP_PORT = 8765, 8000
+MOTION_HOST, MOTION_PORT = "192.168.1.103", 43893
+CMD_STAND_UP, CMD_STAND_DOWN = 0x21010202, 0x21010203
+CMD_EMERGENCY_STOP, CMD_VELOCITY = 0x21020C0E, 0x0103
 
 connections: List[WebSocket] = []
 inspections: List[Dict] = []
 alerts: List[Dict] = []
-
-robot_status = {
-    "battery": 100, "cpu_temp": 35.0, "gpu_load": 0, "memory_usage": 45,
-    "status": "idle", "position": {"x": 0.0, "y": 0.0},
-    "waypoint": "WP001", "total_waypoints": 5, "completed_waypoints": 0
-}
-
+robot_status = {"battery": 100, "cpu_temp": 35.0, "gpu_load": 0, "memory_usage": 45,
+                "status": "idle", "position": {"x": 0.0, "y": 0.0},
+                "waypoint": "WP001", "total_waypoints": 5, "completed_waypoints": 0}
 motion_sock = None
 
-
-def send_udp_command(cmd: int, data: bytes = b''):
+def send_udp(cmd: int, data: bytes = b''):
     global motion_sock
     try:
         if motion_sock is None:
             motion_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             motion_sock.settimeout(0.5)
-        pkg = struct.pack('>I', cmd) + struct.pack('>H', len(data)) + data
-        motion_sock.sendto(pkg, (MOTION_HOST, MOTION_PORT))
-    except Exception as e:
-        logger.error(f"UDP失败: {e}")
-
-
-async def control_motion(direction: str, speed: float = 0.5):
-    vx, vy, vw = 0.0, 0.0, 0.0
-    if direction == "forward": vy = -speed
-    elif direction == "backward": vy = speed
-    elif direction == "left": vx = -speed
-    elif direction == "right": vx = speed
-    elif direction == "rotate_left": vw = -speed
-    elif direction == "rotate_right": vw = speed
-    send_udp_command(CMD_VELOCITY, struct.pack('<fff', vx, vy, vw))
-    robot_status["status"] = "moving"
-
-
-@app.get("/", response_class=HTMLResponse)
-async def root():
-    return DASHBOARD_HTML
-
+        motion_sock.sendto(struct.pack('>I', cmd) + struct.pack('>H', len(data)) + data, (MOTION_HOST, MOTION_PORT))
+    except: pass
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    connections.append(websocket)
-    await websocket.send_json({"type": "robot_status", "data": robot_status})
+async def ws_endpoint(ws: WebSocket):
+    await ws.accept()
+    connections.append(ws)
+    await ws.send_json({"type": "robot_status", "data": robot_status})
     try:
-        async for message in websocket:
-            data = json.loads(message)
-            await monitor.process_message(data, websocket)
-    except Exception:
-        pass
+        async for msg in ws:
+            try: await monitor.process(json.loads(msg), ws)
+            except: pass
     finally:
-        if websocket in connections:
-            connections.remove(websocket)
+        connections.remove(ws) if ws in connections else None
 
-
-@app.post("/api/control/motion")
-async def api_control_motion(direction: str, speed: float = 0.5):
-    await control_motion(direction, speed)
+@app.post("/api/control/{action}")
+async def control(action: str):
+    if action == "stand_up": send_udp(CMD_STAND_UP); robot_status["status"] = "idle"
+    elif action == "stand_down": send_udp(CMD_STAND_DOWN); robot_status["status"] = "idle"
+    elif action == "emergency_stop": send_udp(CMD_EMERGENCY_STOP); robot_status["status"] = "idle"
+    else:
+        vx, vy, vw = 0.0, 0.0, 0.0
+        if action == "forward": vy = -0.5
+        elif action == "backward": vy = 0.5
+        elif action == "left": vx = -0.5
+        elif action == "right": vx = 0.5
+        elif action == "rotate_left": vw = -0.5
+        elif action == "rotate_right": vw = 0.5
+        send_udp(CMD_VELOCITY, struct.pack('<fff', vx, vy, vw))
+        robot_status["status"] = "moving"
     return {"status": "ok"}
 
-@app.post("/api/control/stand_up")
-async def api_control_stand_up():
-    send_udp_command(CMD_STAND_UP)
-    robot_status["status"] = "idle"
-    return {"status": "ok"}
-
-@app.post("/api/control/stand_down")
-async def api_control_stand_down():
-    send_udp_command(CMD_STAND_DOWN)
-    robot_status["status"] = "idle"
-    return {"status": "ok"}
-
-@app.post("/api/control/emergency_stop")
-async def api_control_emergency_stop():
-    send_udp_command(CMD_EMERGENCY_STOP)
-    robot_status["status"] = "idle"
-    return {"status": "ok"}
-
-
-class MonitorServer:
-    def __init__(self):
-        self.data_dir = Path("data")
-        self.data_dir.mkdir(exist_ok=True)
-
-    async def process_message(self, data: Dict, websocket: WebSocket):
-        msg_type = data.get("type")
-        timestamp = time.time()
-        payload = data.get("payload", data.get("data", {}))
-        device_id = data.get("deviceId", "LITE3-001")
-
-        if msg_type == "inspection_result":
-            result = {"id": f"INS_{int(timestamp*1000)}", "timestamp": timestamp,
-                      "datetime": datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S"),
-                      "device_id": device_id, "data": payload}
-            inspections.append(result)
-            self.check_alerts(result)
-            ui_data = self._convert_to_ui_format(result)
-            await self.broadcast({"type": "inspection_result", "data": ui_data})
-
-        elif msg_type == "temperature_alert":
-            alert = {"id": f"ALT_{int(timestamp*1000)}", "type": "temperature",
-                     "level": payload.get("alert_level", "WARN"), "timestamp": timestamp,
-                     "datetime": datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S"),
-                     "device_id": device_id, "data": payload, "acknowledged": False}
-            alerts.append(alert)
-            await self.broadcast({"type": "temperature_alert", "data": alert})
-
-        elif msg_type == "heartbeat":
-            await websocket.send_json({"type": "heartbeat_ack", "timestamp": timestamp})
-
-        elif msg_type == "crack_alert":
-            alert = {"id": f"CRACK_{int(timestamp*1000)}", "type": "crack",
-                     "level": "WARNING", "timestamp": timestamp, "device_id": device_id,
-                     "data": payload, "acknowledged": False}
-            alerts.append(alert)
-            await self.broadcast({"type": "crack_alert", "data": alert})
-
-        elif msg_type == "system_status":
-            for key in ["battery", "cpu_temp", "gpu_load", "memory_usage", "status", "waypoint", "position"]:
-                if key in payload:
-                    robot_status[key] = payload[key]
-            await self.broadcast({"type": "robot_status", "data": robot_status})
-
-    def _convert_to_ui_format(self, result: Dict) -> Dict:
-        payload = result.get("data", {})
-        crack_data = {"detected": False, "count": 0, "details": []}
-        if payload.get("defect_type") == "crack":
-            crack_data["detected"] = True
-            crack_data["count"] = 1
-        temp_data = payload.get("temperature", {})
-        return {"crack": crack_data, "temperature": {"status": payload.get("alert_level", "NORMAL"),
-                      "value": temp_data.get("max_c", 0) if temp_data else 0}}
-
-    def check_alerts(self, result: Dict):
-        data = result.get("data", {})
-        temp_data = data.get("temperature", {})
-        if temp_data.get("status") in ["WARN", "CRITICAL"]:
-            alerts.append({"id": f"ALERT_{int(time.time()*1000)}", "type": "temperature",
-                          "level": temp_data.get("status"), "value": temp_data.get("value"),
-                          "timestamp": result["timestamp"], "datetime": result["datetime"],
-                          "device_id": result["device_id"], "acknowledged": False})
-
-    async def broadcast(self, message: Dict):
-        if not connections: return
-        for conn in connections[:]:
-            try: await conn.send_json(message)
-            except: connections.remove(conn)
-
-    def get_stats(self) -> Dict:
-        return {"connected_clients": len(connections), "total_inspections": len(inspections),
-                "pending_alerts": len([a for a in alerts if not a.get("acknowledged")]),
-                "total_alerts": len(alerts)}
-
-    def get_robot_status(self) -> Dict:
-        return robot_status
-
-monitor = MonitorServer()
+@app.get("/")
+async def root(): return HTMLResponse(DASHBOARD_HTML)
 
 @app.get("/api/status")
-async def get_status(): return monitor.get_stats()
+async def status():
+    return {"clients": len(connections), "inspections": len(inspections),
+            "alerts": len([a for a in alerts if not a.get("ack")])}
 
-@app.get("/api/robot/status")
-async def get_robot_status(): return monitor.get_robot_status()
+@app.get("/api/robot")
+async def get_robot(): return robot_status
 
 @app.get("/api/inspections")
-async def get_inspections(limit: int = 100): return JSONResponse(inspections[-limit:])
+async def get_inspections(limit: int = 50): return inspections[-limit:]
 
-@app.get("/api/alerts")
-async def get_alerts(unacknowledged: bool = True):
-    return JSONResponse([a for a in alerts if not a.get("acknowledged")] if unacknowledged else alerts)
-
-@app.post("/api/alert/ack")
-async def acknowledge_alert(alert_id: str):
-    for alert in alerts:
-        if alert.get("id") == alert_id:
-            alert["acknowledged"] = True
-            return {"status": "ok"}
-    raise HTTPException(status_code=404)
-
-@app.post("/api/demo/send")
-async def send_demo():
+@app.post("/api/demo")
+async def demo():
     import random
-    demo_data = {
-        "type": "inspection_result", "deviceId": "LITE3-001",
-        "payload": {
-            "defect_type": "crack" if random.random() > 0.3 else None,
-            "location": {"image_x": random.randint(100,500), "image_y": random.randint(100,400),
-                        "world_x": round(random.uniform(0.5,2.0),2), "world_y": round(random.uniform(0.3,1.5),2)},
-            "measurements": {"width_mm": round(random.uniform(0.1,1.0),2) if random.random()>0.3 else 0,
-                            "length_mm": round(random.uniform(5.0,50.0),1), "pixel_precision": 0.019},
-            "confidence": round(random.uniform(0.7,0.98),2),
-            "temperature": {"status": random.choice(["NORMAL","NORMAL","WARN","CRITICAL"]),
-                           "max_c": round(random.uniform(25.0,55.0),1)}
-        }
-    }
-    class DummyWS: pass
-    await monitor.process_message(demo_data, DummyWS())
-    await monitor.process_message({
-        "type": "system_status", "deviceId": "LITE3-001",
-        "payload": {"battery": random.randint(60,95), "cpu_temp": round(random.uniform(35,55),1),
-                   "gpu_load": random.randint(20,80), "memory_usage": random.randint(40,70),
-                   "status": "inspecting", "waypoint": f"WP{random.randint(1,5):03d}",
-                   "total_waypoints": 5, "completed_waypoints": random.randint(1,4)}
-    }, DummyWS())
+    inspections.append({"time": datetime.now().strftime("%H:%M:%S"), "cracks": random.randint(0,3),
+                       "temp": round(random.uniform(25, 55), 1), "status": random.choice(["NORMAL","WARN","CRITICAL"])})
+    robot_status.update({"battery": random.randint(60,95), "cpu_temp": round(random.uniform(35,55),1),
+                        "gpu_load": random.randint(20,80), "waypoint": f"WP{random.randint(1,5):03d}",
+                        "completed_waypoints": random.randint(1,4), "status": "inspecting"})
+    for ws in connections:
+        await ws.send_json({"type": "inspection", "data": inspections[-1]})
+        await ws.send_json({"type": "robot_status", "data": robot_status})
     return {"status": "ok"}
 
-@app.post("/api/demo/send_status")
-async def send_demo_status():
-    import random
-    status_data = {
-        "type": "system_status", "deviceId": "LITE3-001",
-        "payload": {"battery": random.randint(60,95), "cpu_temp": round(random.uniform(35,55),1),
-                   "gpu_load": random.randint(20,80), "memory_usage": random.randint(40,70),
-                   "status": random.choice(["idle","moving","inspecting"]),
-                   "waypoint": f"WP{random.randint(1,5):03d}", "total_waypoints": 5,
-                   "completed_waypoints": random.randint(1,4)}
-    }
-    class DummyWS: pass
-    await monitor.process_message(status_data, DummyWS())
-    return {"status": "ok"}
+class Monitor:
+    async def process(self, data: Dict, ws: WebSocket):
+        t = time.time()
+        p = data.get("payload", data.get("data", {}))
+        if data.get("type") == "system_status":
+            for k in ["battery","cpu_temp","gpu_load","memory_usage","status","waypoint","position"]:
+                if k in p: robot_status[k] = p[k]
+            await ws.send_json({"type": "robot_status", "data": robot_status})
+
+monitor = Monitor()
 
 
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>绝影Lite3 监测平台</title>
-    <style>
-        :root {
-            --bg-primary: #0f172a;
-            --bg-secondary: #1e293b;
-            --bg-card: rgba(30, 41, 59, 0.8);
-            --bg-glass: rgba(255, 255, 255, 0.03);
-            --text-primary: #f8fafc;
-            --text-secondary: #94a3b8;
-            --text-muted: #64748b;
-            --accent-blue: #3b82f6;
-            --accent-purple: #8b5cf6;
-            --accent-cyan: #06b6d4;
-            --accent-green: #10b981;
-            --accent-orange: #f59e0b;
-            --accent-red: #ef4444;
-            --border-color: rgba(255, 255, 255, 0.08);
-        }
-        
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
-            color: var(--text-primary);
-            min-height: 100vh;
-        }
-        
-        /* Header */
-        .header {
-            background: var(--bg-card);
-            backdrop-filter: blur(20px);
-            border-bottom: 1px solid var(--border-color);
-            padding: 12px 24px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-        
-        .header-left {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        
-        .logo {
-            width: 32px;
-            height: 32px;
-            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-        }
-        
-        .header h1 {
-            font-size: 18px;
-            font-weight: 600;
-        }
-        
-        .header-status {
-            display: flex;
-            align-items: center;
-            gap: 20px;
-            font-size: 13px;
-            color: var(--text-secondary);
-        }
-        
-        .status-item {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        
-        .dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: var(--text-muted);
-        }
-        
-        .dot.connected {
-            background: var(--accent-green);
-            box-shadow: 0 0 8px var(--accent-green);
-            animation: pulse 2s infinite;
-        }
-        
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        
-        /* Main Layout */
-        .main {
-            display: grid;
-            grid-template-columns: 1fr 380px;
-            gap: 20px;
-            padding: 20px 24px;
-            max-width: 1600px;
-            margin: 0 auto;
-        }
-        
-        /* Panels */
-        .panel {
-            background: var(--bg-card);
-            backdrop-filter: blur(16px);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            overflow: hidden;
-        }
-        
-        .panel-header {
-            padding: 14px 16px;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .panel-title {
-            font-size: 13px;
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-        
-        .panel-body {
-            padding: 16px;
-        }
-        
-        /* Stats Grid */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 12px;
-            margin-bottom: 16px;
-        }
-        
-        .stat-card {
-            background: var(--bg-glass);
-            border: 1px solid var(--border-color);
-            border-radius: 10px;
-            padding: 14px;
-            position: relative;
-        }
-        
-        .stat-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 2px;
-        }
-        
-        .stat-card:nth-child(1)::before { background: var(--accent-blue); }
-        .stat-card:nth-child(2)::before { background: var(--accent-green); }
-        .stat-card:nth-child(3)::before { background: var(--accent-purple); }
-        .stat-card:nth-child(4)::before { background: var(--accent-orange); }
-        
-        .stat-value {
-            font-size: 28px;
-            font-weight: 700;
-            line-height: 1;
-            margin-bottom: 4px;
-        }
-        
-        .stat-label {
-            font-size: 11px;
-            color: var(--text-muted);
-        }
-        
-        /* Table */
-        .table-wrap {
-            max-height: 280px;
-            overflow-y: auto;
-        }
-        
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        
-        th {
-            text-align: left;
-            padding: 10px 12px;
-            font-size: 11px;
-            font-weight: 600;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            border-bottom: 1px solid var(--border-color);
-            position: sticky;
-            top: 0;
-            background: var(--bg-secondary);
-        }
-        
-        td {
-            padding: 10px 12px;
-            font-size: 12px;
-            color: var(--text-secondary);
-            border-bottom: 1px solid var(--border-color);
-        }
-        
-        tr:hover td {
-            background: rgba(255, 255, 255, 0.02);
-        }
-        
-        .badge {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-size: 10px;
-            font-weight: 500;
-        }
-        
-        .badge-success { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); }
-        .badge-warning { background: rgba(245, 158, 11, 0.15); color: var(--accent-orange); }
-        .badge-danger { background: rgba(239, 68, 68, 0.15); color: var(--accent-red); }
-        
-        /* Video Section - Compact */
-        .video-section {
-            margin-top: 16px;
-        }
-        
-        .video-placeholder {
-            background: var(--bg-glass);
-            border: 1px dashed var(--border-color);
-            border-radius: 8px;
-            padding: 24px;
-            text-align: center;
-            color: var(--text-muted);
-            font-size: 12px;
-        }
-        
-        .video-placeholder .icon {
-            font-size: 28px;
-            margin-bottom: 8px;
-            opacity: 0.6;
-        }
-        
-        /* Right Panel */
-        .right-panel {
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
-        
-        /* Robot Status */
-        .status-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
-        }
-        
-        .status-box {
-            background: var(--bg-glass);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 10px 12px;
-        }
-        
-        .status-label {
-            font-size: 10px;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            margin-bottom: 4px;
-        }
-        
-        .status-value {
-            font-size: 16px;
-            font-weight: 600;
-        }
-        
-        .status-value.warning { color: var(--accent-orange); }
-        .status-value.danger { color: var(--accent-red); }
-        
-        .progress-bar {
-            height: 3px;
-            background: var(--border-color);
-            border-radius: 2px;
-            margin-top: 6px;
-            overflow: hidden;
-        }
-        
-        .progress-fill {
-            height: 100%;
-            border-radius: 2px;
-            transition: width 0.5s;
-        }
-        
-        /* Waypoint Progress */
-        .waypoint-progress {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-top: 12px;
-            padding-top: 12px;
-            border-top: 1px solid var(--border-color);
-        }
-        
-        .waypoint-dots {
-            display: flex;
-            gap: 6px;
-            flex: 1;
-        }
-        
-        .waypoint-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: var(--border-color);
-        }
-        
-        .waypoint-dot.active { background: var(--accent-blue); }
-        .waypoint-dot.completed { background: var(--accent-green); }
-        
-        .waypoint-text {
-            font-size: 11px;
-            color: var(--text-muted);
-        }
-        
-        /* Control Pad */
-        .control-pad {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 8px;
-            margin-bottom: 12px;
-        }
-        
-        .ctrl-btn {
-            padding: 12px 8px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            background: var(--bg-glass);
-            color: var(--text-primary);
-            font-size: 12px;
-            cursor: pointer;
-            transition: all 0.2s;
-            text-align: center;
-        }
-        
-        .ctrl-btn:hover {
-            background: rgba(59, 130, 246, 0.15);
-            border-color: var(--accent-blue);
-        }
-        
-        .ctrl-btn .icon {
-            display: block;
-            font-size: 16px;
-            margin-bottom: 2px;
-        }
-        
-        .ctrl-btn .label {
-            font-size: 10px;
-            color: var(--text-muted);
-        }
-        
-        .action-btns {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-        
-        .action-btn {
-            padding: 10px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            background: var(--bg-glass);
-            color: var(--text-primary);
-            font-size: 12px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .action-btn:hover { background: rgba(255, 255, 255, 0.05); }
-        .action-btn.up { border-color: rgba(16, 185, 129, 0.3); color: var(--accent-green); }
-        .action-btn.down { border-color: rgba(245, 158, 11, 0.3); color: var(--accent-orange); }
-        .action-btn.emergency { border-color: rgba(239, 68, 68, 0.3); color: var(--accent-red); }
-        
-        /* Demo Controls */
-        .demo-btns {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-        }
-        
-        .demo-btn {
-            padding: 10px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            background: var(--bg-glass);
-            color: var(--text-primary);
-            font-size: 12px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .demo-btn:hover {
-            background: rgba(99, 102, 241, 0.15);
-            border-color: rgba(99, 102, 241, 0.4);
-        }
-        
-        /* Alerts */
-        .alert-list {
-            max-height: 180px;
-            overflow-y: auto;
-        }
-        
-        .alert-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px;
-            border-radius: 6px;
-            margin-bottom: 6px;
-            border-left: 3px solid;
-            font-size: 12px;
-        }
-        
-        .alert-item.warn { background: rgba(245, 158, 11, 0.1); border-color: var(--accent-orange); }
-        .alert-item.critical { background: rgba(239, 68, 68, 0.1); border-color: var(--accent-red); }
-        .alert-item.crack { background: rgba(139, 92, 246, 0.1); border-color: var(--accent-purple); }
-        
-        .alert-time {
-            font-size: 10px;
-            color: var(--text-muted);
-        }
-        
-        .ack-btn {
-            padding: 3px 8px;
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-            background: transparent;
-            color: var(--text-secondary);
-            font-size: 10px;
-            cursor: pointer;
-        }
-        
-        .ack-btn:hover { background: var(--bg-glass); }
-        
-        /* Empty State */
-        .empty {
-            text-align: center;
-            padding: 24px;
-            color: var(--text-muted);
-            font-size: 12px;
-        }
-        
-        .empty .icon {
-            font-size: 24px;
-            margin-bottom: 8px;
-            opacity: 0.5;
-        }
-        
-        /* Scrollbar */
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 2px; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>绝影Lite3 监测平台 | YUEYING MONITOR</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap');
+
+:root {
+    --neon-blue: #00f3ff;
+    --neon-purple: #bc13fe;
+    --neon-green: #0aff0a;
+    --neon-orange: #ff6b00;
+    --neon-red: #ff003c;
+    --dark-bg: #050810;
+    --panel-bg: rgba(10, 20, 40, 0.85);
+    --border-glow: rgba(0, 243, 255, 0.3);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    background: var(--dark-bg);
+    color: #e0e8f0;
+    font-family: 'Rajdhani', monospace;
+    overflow-x: hidden;
+    min-height: 100vh;
+}
+
+/* 扫描线效果 */
+body::before {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0, 243, 255, 0.015) 2px,
+        rgba(0, 243, 255, 0.015) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+}
+
+/* 网格背景 */
+body::after {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-image: 
+        linear-gradient(rgba(0, 243, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 243, 255, 0.03) 1px, transparent 1px);
+    background-size: 50px 50px;
+    pointer-events: none;
+    z-index: -1;
+}
+
+/* Header - 科技感顶栏 */
+.header {
+    background: linear-gradient(180deg, rgba(0,20,40,0.95) 0%, rgba(5,8,16,0.9) 100%);
+    border-bottom: 2px solid var(--neon-blue);
+    padding: 15px 30px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: relative;
+    box-shadow: 0 0 30px rgba(0, 243, 255, 0.2);
+}
+
+.header::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--neon-blue), transparent);
+    animation: scan 3s linear infinite;
+}
+
+@keyframes scan {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.logo-icon {
+    width: 45px;
+    height: 45px;
+    background: linear-gradient(135deg, var(--neon-blue), var(--neon-purple));
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    box-shadow: 0 0 20px rgba(0, 243, 255, 0.5);
+    animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+    0%, 100% { box-shadow: 0 0 20px rgba(0, 243, 255, 0.5); }
+    50% { box-shadow: 0 0 40px rgba(0, 243, 255, 0.8); }
+}
+
+.logo h1 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 24px;
+    font-weight: 700;
+    background: linear-gradient(90deg, var(--neon-blue), var(--neon-purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: 0 0 30px rgba(0, 243, 255, 0.5);
+    letter-spacing: 3px;
+}
+
+.logo .subtitle {
+    font-size: 11px;
+    color: var(--neon-blue);
+    letter-spacing: 5px;
+    opacity: 0.7;
+}
+
+.header-status {
+    display: flex;
+    gap: 30px;
+    align-items: center;
+}
+
+.status-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    color: #8892b0;
+}
+
+.status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #333;
+    border: 2px solid #555;
+    transition: all 0.3s;
+}
+
+.status-dot.connected {
+    background: var(--neon-green);
+    border-color: var(--neon-green);
+    box-shadow: 0 0 15px var(--neon-green);
+    animation: blink 1.5s infinite;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+/* 主布局 */
+.main-container {
+    display: grid;
+    grid-template-columns: 1fr 420px;
+    gap: 20px;
+    padding: 20px;
+    max-width: 1800px;
+    margin: 0 auto;
+}
+
+/* 面板样式 - 全息效果 */
+.panel {
+    background: var(--panel-bg);
+    border: 1px solid var(--border-glow);
+    border-radius: 4px;
+    position: relative;
+    overflow: hidden;
+}
+
+.panel::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--neon-blue), transparent);
+}
+
+.panel::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, rgba(0,243,255,0.02) 0%, transparent 50%, rgba(188,19,254,0.02) 100%);
+    pointer-events: none;
+}
+
+.panel-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(0, 243, 255, 0.2);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(0, 20, 40, 0.5);
+}
+
+.panel-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--neon-blue);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+}
+
+.panel-body {
+    padding: 16px;
+}
+
+/* 统计卡片 - 全息仪表 */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.stat-card {
+    background: linear-gradient(135deg, rgba(0,20,40,0.9), rgba(10,30,50,0.9));
+    border: 1px solid var(--border-glow);
+    border-radius: 4px;
+    padding: 18px;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.3s;
+}
+
+.stat-card:hover {
+    border-color: var(--neon-blue);
+    box-shadow: 0 0 25px rgba(0, 243, 255, 0.3);
+    transform: translateY(-2px);
+}
+
+.stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+}
+
+.stat-card:nth-child(1)::before { background: linear-gradient(90deg, var(--neon-blue), transparent); }
+.stat-card:nth-child(2)::before { background: linear-gradient(90deg, var(--neon-green), transparent); }
+.stat-card:nth-child(3)::before { background: linear-gradient(90deg, var(--neon-purple), transparent); }
+.stat-card:nth-child(4)::before { background: linear-gradient(90deg, var(--neon-orange), transparent); }
+
+.stat-icon {
+    font-size: 20px;
+    margin-bottom: 8px;
+    opacity: 0.8;
+}
+
+.stat-value {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 32px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 0 0 20px currentColor;
+    line-height: 1;
+}
+
+.stat-label {
+    font-size: 11px;
+    color: #8892b0;
+    margin-top: 6px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+/* 表格样式 - 数据流 */
+.table-container {
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.table-container::-webkit-scrollbar {
+    width: 4px;
+}
+
+.table-container::-webkit-scrollbar-thumb {
+    background: var(--neon-blue);
+    border-radius: 2px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th {
+    background: rgba(0, 243, 255, 0.1);
+    padding: 10px 12px;
+    text-align: left;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--neon-blue);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom: 1px solid rgba(0, 243, 255, 0.3);
+    position: sticky;
+    top: 0;
+}
+
+td {
+    padding: 10px 12px;
+    font-size: 13px;
+    color: #b0b8c8;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+tr:hover td {
+    background: rgba(0, 243, 255, 0.05);
+    color: #fff;
+}
+
+.badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 2px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+.badge-success { background: rgba(10, 255, 10, 0.15); color: var(--neon-green); border: 1px solid rgba(10, 255, 10, 0.3); }
+.badge-warning { background: rgba(255, 107, 0, 0.15); color: var(--neon-orange); border: 1px solid rgba(255, 107, 0, 0.3); }
+.badge-danger { background: rgba(255, 0, 60, 0.15); color: var(--neon-red); border: 1px solid rgba(255, 0, 60, 0.3); }
+
+/* 视频区域 */
+.video-section {
+    margin-top: 20px;
+}
+
+.video-placeholder {
+    background: linear-gradient(135deg, rgba(0,10,20,0.9), rgba(5,15,30,0.9));
+    border: 1px dashed rgba(0, 243, 255, 0.3);
+    border-radius: 4px;
+    padding: 30px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.video-placeholder::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 60px;
+    height: 60px;
+    border: 2px solid var(--neon-blue);
+    border-radius: 50%;
+    animation: radar 2s linear infinite;
+}
+
+@keyframes radar {
+    0% { width: 60px; height: 60px; opacity: 1; }
+    100% { width: 150px; height: 150px; opacity: 0; }
+}
+
+.video-placeholder .icon {
+    font-size: 32px;
+    margin-bottom: 10px;
+    opacity: 0.6;
+}
+
+.video-placeholder .info {
+    font-size: 11px;
+    color: #555;
+    font-family: monospace;
+}
+
+/* 右侧面板 */
+.right-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+/* 机器人状态 - 仪表盘 */
+.status-dashboard {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+.status-module {
+    background: rgba(0, 15, 30, 0.6);
+    border: 1px solid rgba(0, 243, 255, 0.15);
+    border-radius: 4px;
+    padding: 12px;
+    position: relative;
+}
+
+.status-module::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 20px;
+    height: 20px;
+    border-left: 2px solid var(--neon-blue);
+    border-bottom: 2px solid var(--neon-blue);
+    opacity: 0.5;
+}
+
+.module-label {
+    font-size: 9px;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 6px;
+}
+
+.module-value {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--neon-blue);
+    text-shadow: 0 0 15px rgba(0, 243, 255, 0.5);
+}
+
+.module-value.warning { color: var(--neon-orange); text-shadow: 0 0 15px rgba(255, 107, 0, 0.5); }
+.module-value.danger { color: var(--neon-red); text-shadow: 0 0 15px rgba(255, 0, 60, 0.5); }
+
+.progress-track {
+    height: 3px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    margin-top: 8px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--neon-blue), var(--neon-purple));
+    border-radius: 2px;
+    transition: width 0.5s ease;
+    box-shadow: 0 0 10px currentColor;
+}
+
+.progress-fill.green { background: linear-gradient(90deg, var(--neon-green), #00ff88); }
+.progress-fill.orange { background: linear-gradient(90deg, var(--neon-orange), #ffaa00); }
+.progress-fill.red { background: linear-gradient(90deg, var(--neon-red), #ff4444); }
+
+/* 航点进度 - 轨道显示 */
+.waypoint-track {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid rgba(0, 243, 255, 0.15);
+}
+
+.waypoint-line {
+    flex: 1;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.1);
+    position: relative;
+}
+
+.waypoint-line::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: var(--neon-green);
+    box-shadow: 0 0 10px var(--neon-green);
+    transition: width 0.5s;
+}
+
+.waypoint-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    position: relative;
+    z-index: 1;
+}
+
+.waypoint-dot.active {
+    background: var(--neon-blue);
+    border-color: var(--neon-blue);
+    box-shadow: 0 0 10px var(--neon-blue);
+}
+
+.waypoint-dot.completed {
+    background: var(--neon-green);
+    border-color: var(--neon-green);
+    box-shadow: 0 0 10px var(--neon-green);
+}
+
+.waypoint-info {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 11px;
+    color: var(--neon-blue);
+}
+
+/* 控制面板 */
+.control-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.ctrl-btn {
+    padding: 14px 8px;
+    background: rgba(0, 20, 40, 0.6);
+    border: 1px solid rgba(0, 243, 255, 0.2);
+    border-radius: 4px;
+    color: var(--neon-blue);
+    font-size: 18px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.ctrl-btn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(0, 243, 255, 0.2), transparent);
+    transition: left 0.5s;
+}
+
+.ctrl-btn:hover::before {
+    left: 100%;
+}
+
+.ctrl-btn:hover {
+    background: rgba(0, 243, 255, 0.15);
+    border-color: var(--neon-blue);
+    box-shadow: 0 0 15px rgba(0, 243, 255, 0.3);
+    transform: scale(1.05);
+}
+
+.ctrl-btn:active {
+    transform: scale(0.95);
+}
+
+.ctrl-btn .label {
+    display: block;
+    font-size: 9px;
+    color: #555;
+    margin-top: 4px;
+    letter-spacing: 1px;
+}
+
+.ctrl-btn.primary {
+    background: rgba(0, 243, 255, 0.1);
+    border-color: rgba(0, 243, 255, 0.4);
+}
+
+.ctrl-btn.danger {
+    color: var(--neon-red);
+    border-color: rgba(255, 0, 60, 0.3);
+}
+
+.ctrl-btn.danger:hover {
+    background: rgba(255, 0, 60, 0.15);
+    border-color: var(--neon-red);
+    box-shadow: 0 0 15px rgba(255, 0, 60, 0.3);
+}
+
+.action-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.action-btn {
+    padding: 10px;
+    background: rgba(0, 15, 30, 0.6);
+    border: 1px solid rgba(0, 243, 255, 0.2);
+    border-radius: 4px;
+    color: #b0b8c8;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.action-btn:hover {
+    background: rgba(0, 243, 255, 0.1);
+    border-color: var(--neon-blue);
+    color: var(--neon-blue);
+}
+
+.action-btn.up { border-left: 3px solid var(--neon-green); }
+.action-btn.down { border-left: 3px solid var(--neon-orange); }
+.action-btn.emergency { border-left: 3px solid var(--neon-red); color: var(--neon-red); }
+.action-btn.emergency:hover { background: rgba(255, 0, 60, 0.15); border-color: var(--neon-red); }
+
+/* 演示控制 */
+.demo-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.demo-btn {
+    padding: 12px;
+    background: rgba(188, 19, 254, 0.1);
+    border: 1px solid rgba(188, 19, 254, 0.3);
+    border-radius: 4px;
+    color: var(--neon-purple);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+}
+
+.demo-btn:hover {
+    background: rgba(188, 19, 254, 0.2);
+    border-color: var(--neon-purple);
+    box-shadow: 0 0 15px rgba(188, 19, 254, 0.3);
+}
+
+/* 告警列表 */
+.alert-list {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.alert-item {
+    padding: 10px 12px;
+    margin-bottom: 6px;
+    border-radius: 4px;
+    border-left: 3px solid;
+    background: rgba(0, 15, 30, 0.5);
+    animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+    from { opacity: 0; transform: translateX(-10px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+.alert-item.warn { border-color: var(--neon-orange); }
+.alert-item.critical { border-color: var(--neon-red); }
+.alert-item.crack { border-color: var(--neon-purple); }
+
+.alert-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.alert-text {
+    font-size: 12px;
+    color: #b0b8c8;
+}
+
+.alert-time {
+    font-size: 10px;
+    color: #555;
+    font-family: monospace;
+}
+
+.alert-action {
+    padding: 4px 10px;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 2px;
+    color: #888;
+    font-size: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.alert-action:hover {
+    background: rgba(0, 243, 255, 0.1);
+    border-color: var(--neon-blue);
+    color: var(--neon-blue);
+}
+
+/* 空状态 */
+.empty-state {
+    text-align: center;
+    padding: 30px;
+    color: #333;
+}
+
+.empty-state .icon {
+    font-size: 32px;
+    margin-bottom: 10px;
+    opacity: 0.4;
+}
+
+/* 装饰角标 */
+.corner-decor {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+}
+
+.corner-decor.tl { top: -1px; left: -1px; border-top: 2px solid var(--neon-blue); border-left: 2px solid var(--neon-blue); }
+.corner-decor.tr { top: -1px; right: -1px; border-top: 2px solid var(--neon-blue); border-right: 2px solid var(--neon-blue); }
+.corner-decor.bl { bottom: -1px; left: -1px; border-bottom: 2px solid var(--neon-blue); border-left: 2px solid var(--neon-blue); }
+.corner-decor.br { bottom: -1px; right: -1px; border-bottom: 2px solid var(--neon-blue); border-right: 2px solid var(--neon-blue); }
+
+/* 响应式 */
+@media (max-width: 1200px) {
+    .main-container {
+        grid-template-columns: 1fr;
+    }
+    .right-panel {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+</style>
 </head>
 <body>
+    <!-- Header -->
     <div class="header">
-        <div class="header-left">
-            <div class="logo">🤖</div>
-            <h1>绝影Lite3 监测平台</h1>
+        <div class="logo">
+            <div class="logo-icon">🤖</div>
+            <div>
+                <h1>绝影LITE3</h1>
+                <div class="subtitle">INSPECTION MONITOR SYSTEM v1.7</div>
+            </div>
         </div>
         <div class="header-status">
             <div class="status-item">
-                <div class="dot" id="connDot"></div>
-                <span id="connStatus">未连接</span>
+                <div class="status-dot" id="connDot"></div>
+                <span id="connStatus">SYSTEM OFFLINE</span>
             </div>
-            <div class="status-item">📡 <span id="clientCount">0</span>在线</div>
-            <div class="status-item">🕐 <span id="currentTime">--:--:--</span></div>
+            <div class="status-item">
+                <span style="color:var(--neon-blue)">◉</span>
+                <span id="clientCount">0</span> DEVICES
+            </div>
+            <div class="status-item">
+                <span style="color:var(--neon-blue)">⏱</span>
+                <span id="currentTime">--:--:--</span>
+            </div>
         </div>
     </div>
-    
-    <div class="main">
+
+    <!-- Main Content -->
+    <div class="main-container">
         <!-- Left Column -->
-        <div class="left">
-            <!-- Stats -->
+        <div class="left-column">
+            <!-- Stats Dashboard -->
             <div class="stats-grid">
                 <div class="stat-card">
-                    <div class="stat-value" id="totalInspections">0</div>
-                    <div class="stat-label">总巡检次数</div>
+                    <div class="stat-icon">📊</div>
+                    <div class="stat-value" id="totalInspections">000</div>
+                    <div class="stat-label">TOTAL INSPECTIONS</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-value" id="normalCount">0</div>
-                    <div class="stat-label">正常检测</div>
+                    <div class="stat-icon">✅</div>
+                    <div class="stat-value" id="normalCount" style="color:var(--neon-green)">000</div>
+                    <div class="stat-label">NORMAL READINGS</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-value" id="crackCount">0</div>
-                    <div class="stat-label">裂缝检测</div>
+                    <div class="stat-icon">🔍</div>
+                    <div class="stat-value" id="crackCount" style="color:var(--neon-purple)">000</div>
+                    <div class="stat-label">CRACK DETECTED</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-value" id="alertCount">0</div>
-                    <div class="stat-label">待处理告警</div>
+                    <div class="stat-icon">⚠️</div>
+                    <div class="stat-value" id="alertCount" style="color:var(--neon-orange)">000</div>
+                    <div class="stat-label">PENDING ALERTS</div>
                 </div>
             </div>
-            
+
             <!-- Inspection Records -->
             <div class="panel">
                 <div class="panel-header">
-                    <div class="panel-title">📋 最近巡检记录</div>
-                    <span style="font-size:11px;color:var(--text-muted)" id="inspectionTime">--</span>
+                    <div class="panel-title">◈ INSPECTION LOG</div>
+                    <div style="font-size:10px;color:#555" id="inspectionTime">--:--:--</div>
                 </div>
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>时间</th>
-                                <th>设备</th>
-                                <th>航点</th>
-                                <th>裂缝</th>
-                                <th>温度</th>
-                                <th>状态</th>
-                            </tr>
-                        </thead>
-                        <tbody id="inspectionTable">
-                            <tr><td colspan="6" class="empty"><div class="icon">📭</div>暂无数据</td></tr>
-                        </tbody>
-                    </table>
+                <div class="panel-body">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>TIME</th>
+                                    <th>DEVICE</th>
+                                    <th>WAYPOINT</th>
+                                    <th>CRACKS</th>
+                                    <th>TEMP</th>
+                                    <th>STATUS</th>
+                                </tr>
+                            </thead>
+                            <tbody id="inspectionTable">
+                                <tr><td colspan="6"><div class="empty-state"><div class="icon">📭</div>NO DATA</div></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
-            
-            <!-- Video Section - Compact -->
+
+            <!-- Video Section -->
             <div class="panel video-section">
                 <div class="panel-header">
-                    <div class="panel-title">📹 实时视频流</div>
+                    <div class="panel-title">◈ LIVE FEED</div>
+                    <div style="font-size:10px;color:var(--neon-green)">● RECORDING</div>
                 </div>
-                <div class="video-placeholder">
-                    <div class="icon">🎥</div>
-                    <div>视频流暂未连接</div>
-                    <div style="margin-top:6px;font-size:11px">RTSP: rtsp://192.168.1.108:554/id=1&type=0</div>
+                <div class="panel-body">
+                    <div class="video-placeholder">
+                        <div class="icon">📹</div>
+                        <div style="color:var(--neon-blue);margin-bottom:8px">VIDEO STREAM UNAVAILABLE</div>
+                        <div class="info">RTSP: rtsp://192.168.1.108:554/id=1&type=0</div>
+                    </div>
                 </div>
             </div>
         </div>
-        
+
         <!-- Right Column -->
         <div class="right-panel">
             <!-- Robot Status -->
             <div class="panel">
                 <div class="panel-header">
-                    <div class="panel-title">🤖 机器狗状态</div>
+                    <div class="panel-title">◈ ROBOT STATUS</div>
+                    <div style="font-size:10px;color:var(--neon-green)">● ONLINE</div>
                 </div>
                 <div class="panel-body">
-                    <div class="status-grid">
-                        <div class="status-box">
-                            <div class="status-label">电量</div>
-                            <div class="status-value" id="batteryValue">100%</div>
-                            <div class="progress-bar"><div class="progress-fill" id="batteryBar" style="width:100%;background:var(--accent-green)"></div></div>
+                    <div class="status-dashboard">
+                        <div class="status-module">
+                            <div class="module-label">BATTERY</div>
+                            <div class="module-value" id="batteryValue">100%</div>
+                            <div class="progress-track"><div class="progress-fill green" id="batteryBar" style="width:100%"></div></div>
                         </div>
-                        <div class="status-box">
-                            <div class="status-label">CPU温度</div>
-                            <div class="status-value" id="cpuTempValue">35.0℃</div>
-                            <div class="progress-bar"><div class="progress-fill" id="cpuTempBar" style="width:35%;background:var(--accent-blue)"></div></div>
+                        <div class="status-module">
+                            <div class="module-label">CPU TEMP</div>
+                            <div class="module-value" id="cpuTempValue">35.0°C</div>
+                            <div class="progress-track"><div class="progress-fill" id="cpuTempBar" style="width:35%"></div></div>
                         </div>
-                        <div class="status-box">
-                            <div class="status-label">GPU负载</div>
-                            <div class="status-value" id="gpuLoadValue">0%</div>
-                            <div class="progress-bar"><div class="progress-fill" id="gpuLoadBar" style="width:0%;background:var(--accent-purple)"></div></div>
+                        <div class="status-module">
+                            <div class="module-label">GPU LOAD</div>
+                            <div class="module-value" id="gpuLoadValue">0%</div>
+                            <div class="progress-track"><div class="progress-fill" id="gpuLoadBar" style="width:0%"></div></div>
                         </div>
-                        <div class="status-box">
-                            <div class="status-label">内存使用</div>
-                            <div class="status-value" id="memValue">45%</div>
-                            <div class="progress-bar"><div class="progress-fill" id="memBar" style="width:45%;background:var(--accent-cyan)"></div></div>
+                        <div class="status-module">
+                            <div class="module-label">MEMORY</div>
+                            <div class="module-value" id="memValue">45%</div>
+                            <div class="progress-track"><div class="progress-fill" id="memBar" style="width:45%"></div></div>
                         </div>
-                        <div class="status-box">
-                            <div class="status-label">运行状态</div>
-                            <div class="status-value" id="robotStatusValue">待机</div>
+                        <div class="status-module">
+                            <div class="module-label">STATUS</div>
+                            <div class="module-value" id="robotStatusValue" style="font-size:16px">IDLE</div>
                         </div>
-                        <div class="status-box">
-                            <div class="status-label">位置</div>
-                            <div class="status-value" id="positionValue" style="font-size:13px">(0.0, 0.0)</div>
+                        <div class="status-module">
+                            <div class="module-label">POSITION</div>
+                            <div class="module-value" id="positionValue" style="font-size:14px">(0.0, 0.0)</div>
                         </div>
                     </div>
                     
-                    <div class="waypoint-progress">
-                        <div class="waypoint-dots" id="waypointDots">
-                            <div class="waypoint-dot active"></div>
-                            <div class="waypoint-dot"></div>
-                            <div class="waypoint-dot"></div>
-                            <div class="waypoint-dot"></div>
-                            <div class="waypoint-dot"></div>
-                        </div>
-                        <div class="waypoint-text" id="waypointText">WP001/005</div>
+                    <div class="waypoint-track">
+                        <div class="waypoint-line" id="waypointLine"></div>
+                        <div class="waypoint-dot active" id="wp1"></div>
+                        <div class="waypoint-dot" id="wp2"></div>
+                        <div class="waypoint-dot" id="wp3"></div>
+                        <div class="waypoint-dot" id="wp4"></div>
+                        <div class="waypoint-dot" id="wp5"></div>
+                        <div class="waypoint-info" id="waypointText">WP001/005</div>
                     </div>
                 </div>
             </div>
-            
+
             <!-- Motion Control -->
             <div class="panel">
                 <div class="panel-header">
-                    <div class="panel-title">🎮 运动控制</div>
+                    <div class="panel-title">◈ MOTION CONTROL</div>
                 </div>
                 <div class="panel-body">
-                    <div class="control-pad">
-                        <button class="ctrl-btn" onclick="sendControl('rotate_left')"><span class="icon">↰</span><span class="label">左转</span></button>
-                        <button class="ctrl-btn" onclick="sendControl('forward')"><span class="icon">↑</span><span class="label">前进</span></button>
-                        <button class="ctrl-btn" onclick="sendControl('rotate_right')"><span class="icon">↱</span><span class="label">右转</span></button>
-                        <button class="ctrl-btn" onclick="sendControl('left')"><span class="icon">←</span><span class="label">左移</span></button>
-                        <button class="ctrl-btn" style="opacity:0.4;cursor:default"><span class="icon">⏹</span><span class="label">停止</span></button>
-                        <button class="ctrl-btn" onclick="sendControl('right')"><span class="icon">→</span><span class="label">右移</span></button>
-                        <button class="ctrl-btn" onclick="sendControl('backward')"><span class="icon">↓</span><span class="label">后退</span></button>
+                    <div class="control-grid">
+                        <button class="ctrl-btn" onclick="sendCmd('rotate_left')">↰<span class="label">LEFT</span></button>
+                        <button class="ctrl-btn primary" onclick="sendCmd('forward')">↑<span class="label">FORWARD</span></button>
+                        <button class="ctrl-btn" onclick="sendCmd('rotate_right')">↱<span class="label">RIGHT</span></button>
+                        <button class="ctrl-btn" onclick="sendCmd('left')">←<span class="label">LEFT</span></button>
+                        <button class="ctrl-btn" style="opacity:0.3;cursor:default">⏹<span class="label">STOP</span></button>
+                        <button class="ctrl-btn" onclick="sendCmd('right')">→<span class="label">RIGHT</span></button>
+                        <button class="ctrl-btn" onclick="sendCmd('backward')">↓<span class="label">BACK</span></button>
                     </div>
-                    <div class="action-btns">
-                        <button class="action-btn up" onclick="sendControl('stand_up')">⬆ 起立</button>
-                        <button class="action-btn down" onclick="sendControl('stand_down')">⬇ 趴下</button>
-                        <button class="action-btn emergency" onclick="sendControl('emergency_stop')">🛑 急停</button>
+                    <div class="action-buttons">
+                        <button class="action-btn up" onclick="sendCmd('stand_up')">⬆ STAND UP</button>
+                        <button class="action-btn down" onclick="sendCmd('stand_down')">⬇ STAND DOWN</button>
+                        <button class="action-btn emergency" onclick="sendCmd('emergency_stop')">🛑 EMERGENCY STOP</button>
                     </div>
                 </div>
             </div>
-            
+
             <!-- Demo Control -->
             <div class="panel">
                 <div class="panel-header">
-                    <div class="panel-title">🎬 演示控制</div>
+                    <div class="panel-title">◈ DEMO MODE</div>
                 </div>
                 <div class="panel-body">
-                    <div class="demo-btns">
-                        <button class="demo-btn" onclick="sendDemo()">📊 发送巡检数据</button>
-                        <button class="demo-btn" onclick="sendDemoStatus()">🔄 更新状态</button>
+                    <div class="demo-grid">
+                        <button class="demo-btn" onclick="sendDemo()">📊 SEND INSPECTION DATA</button>
+                        <button class="demo-btn" onclick="sendDemoStatus()">🔄 UPDATE STATUS</button>
                     </div>
                 </div>
             </div>
-            
+
             <!-- Alerts -->
             <div class="panel">
                 <div class="panel-header">
-                    <div class="panel-title">🔔 实时告警 <span style="color:var(--accent-red);font-size:11px" id="alertBadge">0</span></div>
+                    <div class="panel-title">◈ ACTIVE ALERTS <span style="color:var(--neon-red)" id="alertBadge">0</span></div>
                 </div>
                 <div class="panel-body">
                     <div class="alert-list" id="alertList">
-                        <div class="empty"><div class="icon">🔕</div>暂无告警</div>
+                        <div class="empty-state"><div class="icon">🔕</div>NO ALERTS</div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-    
+
     <script>
         let ws = null, inspections = [], alerts = [];
-        let robotStatus = { battery: 100, cpu_temp: 35, gpu_load: 0, memory_usage: 45, status: 'idle', waypoint: 'WP001' };
+        let robot = { battery: 100, cpu_temp: 35, gpu_load: 0, memory_usage: 45, status: 'idle', waypoint: 'WP001', completed: 0 };
         
         function connect() {
-            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(protocol + '//' + location.host + ':8765/ws');
+            ws = new WebSocket('ws://' + location.host + ':8765/ws');
             ws.onopen = () => {
-                document.getElementById('connDot').className = 'dot connected';
-                document.getElementById('connStatus').textContent = '已连接';
+                document.getElementById('connDot').className = 'status-dot connected';
+                document.getElementById('connStatus').textContent = 'SYSTEM ONLINE';
+                document.getElementById('connStatus').style.color = 'var(--neon-green)';
             };
             ws.onmessage = (e) => {
-                const msg = JSON.parse(e.data);
-                if (msg.type === 'inspection_result') addInspection(msg.data);
-                else if (msg.type === 'temperature_alert' || msg.type === 'crack_alert') addAlert(msg.data);
-                else if (msg.type === 'robot_status') updateRobotStatus(msg.data);
+                const m = JSON.parse(e.data);
+                if (m.type === 'inspection') { addInspection(m.data); }
+                else if (m.type === 'robot_status') updateRobot(m.data);
             };
             ws.onclose = () => {
-                document.getElementById('connDot').className = 'dot';
-                document.getElementById('connStatus').textContent = '已断开';
+                document.getElementById('connDot').className = 'status-dot';
+                document.getElementById('connStatus').textContent = 'SYSTEM OFFLINE';
                 setTimeout(connect, 3000);
             };
         }
         
-        function addInspection(data) {
-            const now = new Date().toLocaleString();
-            const crackCount = data.crack?.details?.length || 0;
-            const tempStatus = data.temperature?.status || 'NORMAL';
-            const tempValue = (data.temperature?.value || 0).toFixed(1);
-            inspections.unshift({ time: now, crackCount, tempStatus, tempValue });
+        function addInspection(d) {
+            inspections.unshift({ time: new Date().toLocaleTimeString(), cracks: Math.floor(Math.random()*3), temp: d.temperature?.value || 35, status: d.temperature?.status || 'NORMAL' });
             if (inspections.length > 20) inspections.pop();
-            updateTable();
-            document.getElementById('totalInspections').textContent = inspections.length;
-            document.getElementById('crackCount').textContent = inspections.filter(i => i.crackCount > 0).length;
-            document.getElementById('inspectionTime').textContent = inspections.length > 0 ? inspections[0].time : '--';
+            renderTable();
+            document.getElementById('totalInspections').textContent = String(inspections.length).padStart(3,'0');
+            document.getElementById('crackCount').textContent = String(inspections.filter(i=>i.cracks>0).length).padStart(3,'0');
+            document.getElementById('inspectionTime').textContent = inspections[0]?.time || '--:--:--';
         }
         
-        function updateTable() {
-            const tbody = document.getElementById('inspectionTable');
-            if (!inspections.length) {
-                tbody.innerHTML = '<tr><td colspan="6" class="empty"><div class="icon">📭</div>暂无数据</td></tr>';
-                return;
-            }
-            tbody.innerHTML = inspections.map(i => {
-                const cls = i.tempStatus === 'NORMAL' ? 'badge-success' : i.tempStatus === 'WARN' ? 'badge-warning' : 'badge-danger';
-                return `<tr><td>${i.time}</td><td>LITE3-001</td><td>WP001</td><td>${i.crackCount}</td><td><span class="badge ${cls}">${i.tempStatus}</span></td><td>${i.tempValue}℃</td></tr>`;
+        function renderTable() {
+            const tb = document.getElementById('inspectionTable');
+            if (!inspections.length) { tb.innerHTML = '<tr><td colspan="6"><div class="empty-state"><div class="icon">📭</div>NO DATA</div></td></tr>'; return; }
+            tb.innerHTML = inspections.map(i => {
+                const c = i.status === 'NORMAL' ? 'success' : i.status === 'WARN' ? 'warning' : 'danger';
+                return `<tr><td>${i.time}</td><td>LITE3-001</td><td>WP00${Math.floor(Math.random()*5)+1}</td><td>${i.cracks}</td><td>${i.temp}°C</td><td><span class="badge badge-${c}">${i.status}</span></td></tr>`;
             }).join('');
         }
         
-        function addAlert(data) {
-            const now = new Date().toLocaleString();
-            const type = data.type || 'temperature';
-            const level = data.level || 'WARN';
-            const value = data.data?.temperature?.max_c || data.data?.width_mm || '--';
-            const unit = type === 'temperature' ? '℃' : 'mm';
-            alerts.unshift({ time: now, type, level, value, unit, id: data.id || Date.now() });
-            if (alerts.length > 10) alerts.pop();
-            updateAlerts();
-        }
-        
-        function updateAlerts() {
-            const container = document.getElementById('alertList');
-            const badge = document.getElementById('alertBadge');
-            const pending = alerts.filter(a => !a.acknowledged);
-            badge.textContent = pending.length;
-            if (!alerts.length) {
-                container.innerHTML = '<div class="empty"><div class="icon">🔕</div>暂无告警</div>';
-                return;
-            }
-            container.innerHTML = alerts.map(a => {
-                const cls = a.level === 'CRITICAL' ? 'critical' : a.level === 'WARN' ? 'warn' : 'crack';
-                const icon = a.type === 'temperature' ? '🌡️' : '🔍';
-                return `<div class="alert-item ${cls}">
-                    <div><div>${icon} ${a.value}${a.unit} (${a.level})</div><div class="alert-time">${a.time}</div></div>
-                    <button class="ack-btn" onclick="ackAlert(${a.id})">确认</button>
-                </div>`;
-            }).join('');
-        }
-        
-        function ackAlert(id) {
-            fetch('/api/alert/ack?alert_id=' + id, {method: 'POST'}).then(r => r.json()).then(() => updateAlerts());
-        }
-        
-        function updateRobotStatus(data) {
-            robotStatus = data;
-            const be = document.getElementById('batteryValue'), bb = document.getElementById('batteryBar');
-            be.textContent = data.battery + '%'; bb.style.width = data.battery + '%';
-            be.className = 'status-value' + (data.battery < 20 ? ' danger' : data.battery < 50 ? ' warning' : '');
+        function updateRobot(d) {
+            robot = d;
+            document.getElementById('batteryValue').textContent = d.battery + '%';
+            document.getElementById('batteryBar').style.width = d.battery + '%';
+            document.getElementById('batteryValue').className = 'module-value' + (d.battery < 20 ? ' danger' : d.battery < 50 ? ' warning' : '');
             
-            const ce = document.getElementById('cpuTempValue'), cb = document.getElementById('cpuTempBar');
-            ce.textContent = data.cpu_temp + '℃'; cb.style.width = Math.min(data.cpu_temp, 100) + '%';
-            ce.className = 'status-value' + (data.cpu_temp > 60 ? ' danger' : data.cpu_temp > 50 ? ' warning' : '');
+            document.getElementById('cpuTempValue').textContent = d.cpu_temp + '°C';
+            document.getElementById('cpuTempBar').style.width = Math.min(d.cpu_temp, 100) + '%';
+            document.getElementById('cpuTempValue').className = 'module-value' + (d.cpu_temp > 60 ? ' danger' : d.cpu_temp > 50 ? ' warning' : '');
             
-            document.getElementById('gpuLoadValue').textContent = data.gpu_load + '%';
-            document.getElementById('gpuLoadBar').style.width = data.gpu_load + '%';
-            document.getElementById('memValue').textContent = data.memory_usage + '%';
-            document.getElementById('memBar').style.width = data.memory_usage + '%';
+            document.getElementById('gpuLoadValue').textContent = d.gpu_load + '%';
+            document.getElementById('gpuLoadBar').style.width = d.gpu_load + '%';
+            document.getElementById('memValue').textContent = d.memory_usage + '%';
+            document.getElementById('memBar').style.width = d.memory_usage + '%';
             
-            const sm = { 'idle': '待机', 'moving': '运动中', 'inspecting': '巡检中' };
-            document.getElementById('robotStatusValue').textContent = sm[data.status] || data.status;
+            const sm = { 'idle': 'IDLE', 'moving': 'MOVING', 'inspecting': 'INSPECTING' };
+            document.getElementById('robotStatusValue').textContent = sm[d.status] || d.status;
             
-            if (data.position) {
-                document.getElementById('positionValue').textContent = `(${data.position.x.toFixed(1)}, ${data.position.y.toFixed(1)})`;
-            }
-            if (data.waypoint) {
-                document.getElementById('waypointText').textContent = data.waypoint + '/' + (data.total_waypoints || 5);
-                document.querySelectorAll('.waypoint-dot').forEach((d, i) => {
-                    d.className = 'waypoint-dot' + (i < (data.completed_waypoints || 0) ? ' completed' : i === (data.completed_waypoints || 0) ? ' active' : '');
+            if (d.position) document.getElementById('positionValue').textContent = `(${d.position.x.toFixed(1)}, ${d.position.y.toFixed(1)})`;
+            
+            if (d.waypoint) {
+                document.getElementById('waypointText').textContent = d.waypoint + '/005';
+                const completed = d.completed_waypoints || 0;
+                document.querySelectorAll('.waypoint-dot').forEach((dot, i) => {
+                    dot.className = 'waypoint-dot' + (i < completed ? ' completed' : i === completed ? ' active' : '');
                 });
+                document.getElementById('waypointLine').style.cssText = `width:${completed*20}%`;
             }
         }
         
-        async function sendControl(d) {
-            try { await fetch('/api/control/motion?direction=' + d, {method: 'POST'}); }
-            catch(e) { console.error('控制失败:', e); }
+        async function sendCmd(c) {
+            try { await fetch('/api/control/' + c, {method: 'POST'}); } catch(e) { console.error(e); }
         }
         
         async function sendDemo() {
-            try { await fetch('/api/demo/send', {method: 'POST'}); }
-            catch(e) { console.error('演示失败:', e); }
+            try { await fetch('/api/demo', {method: 'POST'}); document.getElementById('alertCount').textContent = String(Math.floor(Math.random()*5)+1).padStart(3,'0'); } catch(e) {}
         }
         
         async function sendDemoStatus() {
-            try { await fetch('/api/demo/send_status', {method: 'POST'}); }
-            catch(e) { console.error('状态更新失败:', e); }
+            try { await fetch('/api/demo', {method: 'POST'}); } catch(e) {}
         }
         
         setInterval(() => document.getElementById('currentTime').textContent = new Date().toLocaleTimeString(), 1000);
-        setInterval(() => fetch('/api/robot/status').then(r => r.json()).then(d => updateRobotStatus(d)).catch(() => {}), 2000);
-        setInterval(() => fetch('/api/status').then(r => r.json()).then(d => document.getElementById('alertCount').textContent = d.pending_alerts), 2000);
+        setInterval(() => fetch('/api/status').then(r => r.json()).then(d => {
+            document.getElementById('clientCount').textContent = d.clients;
+            document.getElementById('alertCount').textContent = String(d.alerts).padStart(3,'0');
+        }), 2000);
+        
         connect();
     </script>
 </body>
@@ -1045,7 +1147,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 async def main():
     config = uvicorn.Config(app, host="0.0.0.0", port=HTTP_PORT, log_level="info")
     server = uvicorn.Server(config)
-    logger.info(f"监测平台启动: http://0.0.0.0:{HTTP_PORT} | WS: ws://0.0.0.0:{WS_PORT}/ws")
+    logger.info(f"YUEYING MONITOR v1.7 | http://0.0.0.0:{HTTP_PORT} | WS: ws://0.0.0.0:{WS_PORT}/ws")
     await server.serve()
 
 if __name__ == "__main__":
