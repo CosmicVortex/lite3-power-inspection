@@ -246,10 +246,11 @@ class Inspector:
         Args:
             waypoint: 航点配置
         """
-        # TODO: 实现运动控制逻辑
+        # 移动至航点位置（模拟模式下不实际运动）
+        # TODO: 实现实际运动控制逻辑，需在真实硬件环境下测试
         x = waypoint.get('x', 0)
         y = waypoint.get('y', 0)
-        self.udp_controller.set_velocity(x, y, 0)
+        self.udp_controller.set_velocity(x * 0.3, y * 0.3, 0)
         await asyncio.sleep(1)
         self.udp_controller.set_velocity(0, 0, 0)
     

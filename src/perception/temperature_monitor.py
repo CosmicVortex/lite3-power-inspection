@@ -127,15 +127,24 @@ class TemperatureMonitor:
     
     def _apply_filter(self, new_value: float) -> float:
         """应用滑动平均滤波
-        
+
         Args:
             new_value: 新测量值
-            
+
         Returns:
             滤波后的值
         """
-        # TODO: 实现完整的滑动平均滤波
-        return new_value
+        # 滑动平均滤波：维护固定窗口的历史温度值
+        if not hasattr(self, '_temp_history'):
+            self._temp_history = deque(maxlen=self.filter_window)
+
+        self._temp_history.append(new_value)
+
+        if len(self._temp_history) == 0:
+            return new_value
+
+        filtered = sum(self._temp_history) / len(self._temp_history)
+        return filtered
     
     def _determine_alert_status(self, max_temp: float) -> AlertLevel:
         """判断告警状态

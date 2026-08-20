@@ -113,8 +113,10 @@ class YOLODetector:
     
     def _real_detect(self, image) -> List[DetectionResult]:
         """真实检测 - 使用TensorRT模型推理"""
-        # TODO: 实现TensorRT推理
-        pass
+        # TODO: 实现TensorRT推理（需加载TensorRT引擎后使用）
+        # 当前模拟模式生成合理数据，等待真实模型部署后可切换
+        logger.warning("TensorRT推理未实现，回退到模拟模式")
+        return self._simulate_detect(image)
     
     @property
     def is_simulation(self) -> bool:

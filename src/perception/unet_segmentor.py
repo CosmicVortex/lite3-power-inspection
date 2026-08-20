@@ -84,14 +84,16 @@ class UNetSegmentor:
     
     def _infer(self, crop: np.ndarray) -> np.ndarray:
         """执行分割推理
-        
+
         Args:
             crop: 裁剪区域
-            
+
         Returns:
             二值化掩码
         """
-        # TODO: 实现ONNX推理
+        # TODO: 实现ONNX推理（需加载ONNX模型后使用）
+        # 当前返回空掩码，等待真实模型部署后可切换
+        logger.warning("ONNX推理未实现，返回空掩码")
         h, w = crop.shape[:2]
         return np.zeros((h, w), dtype=np.uint8)
     
