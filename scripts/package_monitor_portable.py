@@ -190,9 +190,12 @@ pause
         zipf.writestr("start_monitor.bat", startup_script_win)
         print(f"  ✅ start_monitor.bat")
     
-    # 设置权限
+    # 设置权限（仅Linux/macOS）
     if os.name != 'nt':
-        os.chmod("start_monitor.sh", 0o755)
+        try:
+            os.chmod("start_monitor.sh", 0o755)
+        except:
+            pass
     
     # 显示文件大小
     file_size = package_path.stat().st_size
