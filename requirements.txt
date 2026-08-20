@@ -1,23 +1,16 @@
-# 核心依赖
+# 核心依赖（模拟模式必需）
+# 使用命令：pip install -r requirements.txt
+loguru>=0.6.0
 numpy>=1.21.0
 opencv-python>=4.5.0
-torch>=2.0.0
-torchvision>=0.15.0
-
-# 推理加速
-tensorrt>=8.0.0
-onnx>=1.12.0
-onnxruntime-gpu>=1.14.0
-
-# 网络通信
-websockets>=10.0
+websockets>=12.0
 requests>=2.28.0
 pyyaml>=6.0
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
 
-# 视频处理
-av>=10.0
-ffmpeg-python>=0.2.0
-
-# 工具库
-tqdm>=4.64.0
-loguru>=0.6.0
+# 说明：
+# - 上述依赖支持完整的模拟模式演示
+# - 无需CUDA/GPU环境
+# - 适用于任何Python 3.8+环境
