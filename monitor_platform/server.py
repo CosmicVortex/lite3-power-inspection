@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-监测平台WebSocket服务端 - 支持真实和模拟数据
-
-用于接收机器人上报的巡检数据并可视化展示
+监测平台WebSocket服务端 - 完整版
+支持机器狗状态监控、运动控制和巡检数据接收
 """
 
 import asyncio
 import json
 import time
 import logging
+import struct
+import socket
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
-
-import websockets
-import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
+import uvicorn
 
 # 配置日志
 logging.basicConfig(
@@ -31,10 +30,125 @@ WS_HOST = "0.0.0.0"
 WS_PORT = 8765
 HTTP_PORT = 8000
 
+# UDP运动控制配置
+MOTION_HOST = "192.168.1.103"
+MOTION_PORT = 43893
+
+# UDP指令码
+CMD_STAND_UP = 0x21010202
+CMD_STAND_DOWN = 0x21010203
+CMD_EMERGENCY_STOP = 0x21020C0E
+CMD_VELOCITY = 0x0103
+
 # 全局数据存储
-connections: List[websockets.WebSocketServerProtocol] = []
+connections: List[WebSocket] = []
 inspections: List[Dict] = []
 alerts: List[Dict] = []
+
+# 机器狗状态
+robot_status = {
+    "battery": 100,
+    "cpu_temp": 35.0,
+    "gpu_load": 0,
+    "memory_usage": 45,
+    "status": "idle",  # idle/moving/inspecting/charging
+    "position": {"x": 0.0, "y": 0.0, "theta": 0.0},
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "zoom": 1,
+    "mode": "manual",  # manual/simulation/real
+    "waypoint": "WP001",
+    "total_waypoints": 5,
+    "completed_waypoints": 0,
+    "uptime_seconds": 0,
+    "last_heartbeat": 0
+}
+
+# UDPsocket
+motion_sock = None
+
+
+def send_udp_command(cmd: int, data: bytes = b''):
+    """发送UDP运动控制命令"""
+    global motion_sock
+    try:
+        if motion_sock is None:
+            motion_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            motion_sock.settimeout(0.5)
+        
+        # 构建UDP数据包
+        # 格式: [cmd(4bytes)][data_len(2bytes)][data]
+        pkg = struct.pack('>I', cmd) + struct.pack('>H', len(data)) + data
+        motion_sock.sendto(pkg, (MOTION_HOST, MOTION_PORT))
+        logger.info(f"发送UDP命令: 0x{cmd:08X}")
+    except Exception as e:
+        logger.error(f"UDP发送失败: {e}")
+
+
+async def control_motion(direction: str, speed: float = 0.5):
+    """控制机器狗运动"""
+    # velocity: vx, vy, vw (各2字节，范围-1.0到1.0)
+    vx = 0.0
+    vy = 0.0
+    vw = 0.0
+    
+    if direction == "forward":
+        vy = -speed
+    elif direction == "backward":
+        vy = speed
+    elif direction == "left":
+        vx = -speed
+    elif direction == "right":
+        vx = speed
+    elif direction == "rotate_left":
+        vw = -speed
+    elif direction == "rotate_right":
+        vw = speed
+    
+    # 打包速度数据 (3个float32)
+    data = struct.pack('<fff', vx, vy, vw)
+    send_udp_command(CMD_VELOCITY, data)
+    
+    # 更新状态
+    robot_status["status"] = "moving"
+
+
+@app.post("/api/control/motion")
+async def api_control_motion(direction: str, speed: float = 0.5):
+    """运动控制API"""
+    await control_motion(direction, speed)
+    return {"status": "ok", "direction": direction, "speed": speed}
+
+
+@app.post("/api/control/stand_up")
+async def api_control_stand_up():
+    """起立"""
+    send_udp_command(CMD_STAND_UP)
+    robot_status["status"] = "idle"
+    return {"status": "ok", "action": "stand_up"}
+
+
+@app.post("/api/control/stand_down")
+async def api_control_stand_down():
+    """趴下"""
+    send_udp_command(CMD_STAND_DOWN)
+    robot_status["status"] = "idle"
+    return {"status": "ok", "action": "stand_down"}
+
+
+@app.post("/api/control/emergency_stop")
+async def api_control_emergency_stop():
+    """急停"""
+    send_udp_command(CMD_EMERGENCY_STOP)
+    robot_status["status"] = "idle"
+    return {"status": "ok", "action": "emergency_stop"}
+
+
+@app.post("/api/control/ptz")
+async def api_control_ptz(yaw: float = None, pitch: float = None, zoom: int = None):
+    """云台控制（预留接口）"""
+    # TODO: 实现HTTP云台控制
+    return {"status": "ok", "yaw": yaw, "pitch": pitch, "zoom": zoom}
 
 
 class MonitorServer:
@@ -44,10 +158,16 @@ class MonitorServer:
         self.data_dir = Path("data")
         self.data_dir.mkdir(exist_ok=True)
         
-    async def handle_client(self, websocket):
+    async def handle_client(self, websocket: WebSocket):
         """处理客户端连接"""
         connections.append(websocket)
         logger.info(f"客户端已连接，当前在线: {len(connections)}")
+        
+        # 发送初始状态
+        await websocket.send_json({
+            "type": "robot_status",
+            "data": robot_status
+        })
         
         try:
             async for message in websocket:
@@ -55,17 +175,19 @@ class MonitorServer:
                     data = json.loads(message)
                     await self.process_message(data, websocket)
                 except json.JSONDecodeError:
-                    await websocket.send(json.dumps({
+                    await websocket.send_json({
                         "type": "error",
                         "message": "Invalid JSON format"
-                    }))
-        except websockets.exceptions.ConnectionClosed:
+                    })
+        except WebSocketDisconnect:
             logger.info("客户端断开连接")
+        except Exception as e:
+            logger.error(f"客户端错误: {e}")
         finally:
             if websocket in connections:
                 connections.remove(websocket)
     
-    async def process_message(self, data: Dict, websocket):
+    async def process_message(self, data: Dict, websocket: WebSocket):
         """处理接收到的消息"""
         msg_type = data.get("type")
         timestamp = time.time()
@@ -84,27 +206,30 @@ class MonitorServer:
                 "data": payload
             }
             inspections.append(result)
-
+            
             # 检查告警
             self.check_alerts(result)
-
+            
             # 转换为UI期望的数据结构并广播
             ui_data = self._convert_to_ui_format(result)
             await self.broadcast({
                 "type": "inspection_result",
                 "data": ui_data
             })
-
+            
             logger.info(f"收到巡检数据: {result['id']}")
         
         elif msg_type == "temperature_alert":
             # 存储温度告警
             alert = {
                 "id": f"ALT_{int(timestamp * 1000)}",
+                "type": "temperature",
+                "level": payload.get("alert_level", "WARN"),
                 "timestamp": timestamp,
                 "datetime": datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S"),
                 "device_id": device_id,
-                "data": payload
+                "data": payload,
+                "acknowledged": False
             }
             alerts.append(alert)
             
@@ -117,10 +242,12 @@ class MonitorServer:
             logger.warning(f"收到温度告警: {payload.get('alert_level')} - {payload.get('temperature', {}).get('max_c')}℃")
         
         elif msg_type == "heartbeat":
-            await websocket.send(json.dumps({
+            # 更新心跳时间
+            robot_status["last_heartbeat"] = timestamp
+            await websocket.send_json({
                 "type": "heartbeat_ack",
                 "timestamp": timestamp
-            }))
+            })
         
         elif msg_type == "crack_alert":
             # 存储裂缝告警
@@ -131,7 +258,8 @@ class MonitorServer:
                 "timestamp": timestamp,
                 "datetime": datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S"),
                 "device_id": device_id,
-                "data": payload
+                "data": payload,
+                "acknowledged": False
             }
             alerts.append(alert)
             
@@ -144,33 +272,48 @@ class MonitorServer:
             logger.warning(f"收到裂缝告警: {payload.get('width_mm')}mm")
         
         elif msg_type == "system_status":
-            # 处理系统状态（静默处理，仅记录日志）
-            logger.debug(f"收到系统状态: {payload.get('status', 'unknown')}")
+            # 更新机器狗状态
+            status_data = payload
+            if "battery" in status_data:
+                robot_status["battery"] = status_data["battery"]
+            if "cpu_temp" in status_data:
+                robot_status["cpu_temp"] = status_data["cpu_temp"]
+            if "gpu_load" in status_data:
+                robot_status["gpu_load"] = status_data["gpu_load"]
+            if "memory_usage" in status_data:
+                robot_status["memory_usage"] = status_data["memory_usage"]
+            if "status" in status_data:
+                robot_status["status"] = status_data["status"]
+            if "waypoint" in status_data:
+                robot_status["waypoint"] = status_data["waypoint"]
+            if "position" in status_data:
+                robot_status["position"] = status_data["position"]
+            
+            # 广播状态更新
+            await self.broadcast({
+                "type": "robot_status",
+                "data": robot_status
+            })
+            
+            logger.debug(f"收到系统状态: {status_data.get('status', 'unknown')}")
         
         else:
-            await websocket.send(json.dumps({
+            await websocket.send_json({
                 "type": "error",
                 "message": f"Unknown message type: {msg_type}"
-            }))
+            })
     
     def _convert_to_ui_format(self, result: Dict) -> Dict:
-        """将内部数据格式转换为UI期望的数据格式
-
-        UI期望格式:
-        {
-            "crack": {"detected": bool, "count": int, "details": [...]},
-            "temperature": {"status": str, "value": float}
-        }
-        """
+        """将内部数据格式转换为UI期望的数据格式"""
         payload = result.get("data", {})
-
+        
         # 处理裂缝检测数据
         crack_data = {
             "detected": False,
             "count": 0,
             "details": []
         }
-
+        
         if payload.get("defect_type") == "crack":
             crack_data["detected"] = True
             crack_data["count"] = 1
@@ -181,11 +324,11 @@ class MonitorServer:
                 "confidence": payload.get("confidence", 0),
                 "location": payload.get("location", {})
             })
-
+        
         # 处理温度数据
         temp_data = payload.get("temperature", {})
         alert_level = payload.get("alert_level", "NORMAL")
-
+        
         ui_data = {
             "crack": crack_data,
             "temperature": {
@@ -193,9 +336,9 @@ class MonitorServer:
                 "value": temp_data.get("max_c", 0) if temp_data else 0
             }
         }
-
+        
         return ui_data
-
+    
     def check_alerts(self, result: Dict):
         """检查并生成告警"""
         data = result.get("data", {})
@@ -244,7 +387,7 @@ class MonitorServer:
         disconnected = []
         for conn in connections:
             try:
-                await conn.send(json.dumps(message, ensure_ascii=False))
+                await conn.send_json(message)
             except Exception as e:
                 logger.error(f"广播失败: {e}")
                 disconnected.append(conn)
@@ -264,6 +407,10 @@ class MonitorServer:
             "inspections_last_minute": len([i for i in inspections 
                                            if time.time() - i["timestamp"] < 60])
         }
+    
+    def get_robot_status(self) -> Dict:
+        """获取机器狗状态"""
+        return robot_status
 
 
 # FastAPI应用
@@ -297,6 +444,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 })
     except WebSocketDisconnect:
         logger.info("WebSocket客户端断开")
+    except Exception as e:
+        logger.error(f"WebSocket错误: {e}")
     finally:
         if websocket in connections:
             connections.remove(websocket)
@@ -306,6 +455,12 @@ async def websocket_endpoint(websocket: WebSocket):
 async def get_status():
     """系统状态"""
     return monitor.get_stats()
+
+
+@app.get("/api/robot/status")
+async def get_robot_status():
+    """机器狗状态"""
+    return monitor.get_robot_status()
 
 
 @app.get("/api/inspections")
@@ -335,34 +490,99 @@ async def acknowledge_alert(alert_id: str):
 @app.post("/api/demo/send")
 async def send_demo():
     """发送演示数据"""
+    import random
+    
+    # 生成模拟巡检数据
     demo_data = {
         "type": "inspection_result",
         "deviceId": "LITE3-001",
         "payload": {
-            "crack": {
-                "detected": True,
-                "count": 2,
-                "details": [
-                    {"id": "CRACK_001", "width_mm": 0.5, "length_mm": 12.3, 
-                     "confidence": 0.92, "location": {"x": 120, "y": 340}},
-                    {"id": "CRACK_002", "width_mm": 0.3, "length_mm": 8.5,
-                     "confidence": 0.87, "location": {"x": 450, "y": 200}}
-                ]
+            "defect_type": "crack" if random.random() > 0.3 else None,
+            "subtype": "longitudinal" if random.random() > 0.5 else "transverse",
+            "location": {
+                "image_x": random.randint(100, 500),
+                "image_y": random.randint(100, 400),
+                "world_x": round(random.uniform(0.5, 2.0), 2),
+                "world_y": round(random.uniform(0.3, 1.5), 2),
+                "world_theta": round(random.uniform(0, 3.14), 2)
+            },
+            "measurements": {
+                "width_mm": round(random.uniform(0.1, 1.0), 2) if random.random() > 0.3 else 0,
+                "length_mm": round(random.uniform(5.0, 50.0), 1),
+                "pixel_precision": 0.019,
+                "zoom_level": random.choice([5, 10, 15])
+            },
+            "confidence": round(random.uniform(0.7, 0.98), 2),
+            "snapshot_url": f"http://192.168.1.103:8080/snap/CRACK-WP{random.randint(1,5)}-{int(time.time()*1000)}.jpg",
+            "waypoint_id": f"WP{random.randint(1,5):03d}",
+            "ptz_state": {
+                "yaw": round(random.uniform(-280, 280), 1),
+                "pitch": round(random.uniform(-115, 40), 1),
+                "zoom": random.choice([5, 10, 15])
             },
             "temperature": {
-                "status": "WARN",
-                "value": 46.5,
-                "max_value": 48.2,
-                "roi": {"x": 200, "y": 150, "w": 50, "h": 50}
+                "status": random.choice(["NORMAL", "NORMAL", "WARN", "CRITICAL"]),
+                "max_c": round(random.uniform(25.0, 55.0), 1),
+                "avg_c": round(random.uniform(25.0, 45.0), 1),
+                "min_c": round(random.uniform(20.0, 35.0), 1)
             }
         }
     }
+    
     # 模拟处理
     class DummyWS:
         pass
     dummy_ws = DummyWS()
     await monitor.process_message(demo_data, dummy_ws)
+    
+    # 同时模拟系统状态更新
+    status_data = {
+        "type": "system_status",
+        "deviceId": "LITE3-001",
+        "payload": {
+            "battery": random.randint(60, 95),
+            "cpu_temp": round(random.uniform(35.0, 55.0), 1),
+            "gpu_load": random.randint(20, 80),
+            "memory_usage": random.randint(40, 70),
+            "status": "inspecting",
+            "waypoint": f"WP{random.randint(1,5):03d}",
+            "total_waypoints": 5,
+            "completed_waypoints": random.randint(1, 4),
+            "uptime_seconds": random.randint(1800, 7200)
+        }
+    }
+    await monitor.process_message(status_data, dummy_ws)
+    
     return {"status": "ok", "message": "演示数据已发送"}
+
+
+@app.post("/api/demo/send_status")
+async def send_demo_status():
+    """发送演示状态数据"""
+    import random
+    
+    status_data = {
+        "type": "system_status",
+        "deviceId": "LITE3-001",
+        "payload": {
+            "battery": random.randint(60, 95),
+            "cpu_temp": round(random.uniform(35.0, 55.0), 1),
+            "gpu_load": random.randint(20, 80),
+            "memory_usage": random.randint(40, 70),
+            "status": random.choice(["idle", "moving", "inspecting"]),
+            "waypoint": f"WP{random.randint(1,5):03d}",
+            "total_waypoints": 5,
+            "completed_waypoints": random.randint(1, 4),
+            "uptime_seconds": random.randint(1800, 7200)
+        }
+    }
+    
+    class DummyWS:
+        pass
+    dummy_ws = DummyWS()
+    await monitor.process_message(status_data, dummy_ws)
+    
+    return {"status": "ok", "message": "状态数据已更新"}
 
 
 # 管理界面HTML
@@ -376,35 +596,104 @@ DASHBOARD_HTML = """
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; }
-        .header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: white; padding: 20px 40px; display: flex; justify-content: space-between; align-items: center; }
-        .header h1 { font-size: 24px; }
+        
+        /* Header */
+        .header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: white; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 22px; }
         .status-bar { display: flex; gap: 20px; align-items: center; }
-        .status-item { display: flex; align-items: center; gap: 8px; }
+        .status-item { display: flex; align-items: center; gap: 8px; font-size: 14px; }
         .dot { width: 10px; height: 10px; border-radius: 50%; background: #ccc; }
         .dot.connected { background: #22c55e; animation: pulse 2s infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-        .container { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; padding: 20px 40px; max-width: 1600px; margin: 0 auto; }
+        
+        /* Main Container */
+        .container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 20px 30px; max-width: 1800px; margin: 0 auto; }
+        
+        /* Panels */
         .panel { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        .panel h2 { font-size: 18px; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #e5e7eb; }
+        .panel h2 { font-size: 16px; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; }
+        
+        /* Stats Cards */
         .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
-        .stat-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 12px; text-align: center; }
-        .stat-value { font-size: 32px; font-weight: bold; }
-        .stat-label { font-size: 14px; opacity: 0.9; margin-top: 5px; }
+        .stat-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; border-radius: 12px; text-align: center; }
+        .stat-card:nth-child(2) { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+        .stat-card:nth-child(3) { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+        .stat-card:nth-child(4) { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); }
+        .stat-value { font-size: 28px; font-weight: bold; }
+        .stat-label { font-size: 12px; opacity: 0.9; margin-top: 5px; }
+        
+        /* Robot Status Panel */
+        .robot-status { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; }
+        .status-item-detail { background: #f8fafc; padding: 12px; border-radius: 8px; }
+        .status-item-detail label { font-size: 12px; color: #64748b; display: block; margin-bottom: 5px; }
+        .status-item-detail .value { font-size: 18px; font-weight: 600; color: #1e293b; }
+        .status-item-detail .value.warning { color: #f59e0b; }
+        .status-item-detail .value.danger { color: #ef4444; }
+        
+        /* Progress Bars */
+        .progress-bar { height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden; margin-top: 8px; }
+        .progress-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+        .progress-fill.battery { background: linear-gradient(90deg, #22c55e, #16a34a); }
+        .progress-fill.battery.low { background: linear-gradient(90deg, #ef4444, #dc2626); }
+        .progress-fill.temp { background: linear-gradient(90deg, #3b82f6, #8b5cf6); }
+        .progress-fill.temp.high { background: linear-gradient(90deg, #f59e0b, #ef4444); }
+        
+        /* Control Panel */
+        .control-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 15px; }
+        .control-btn { padding: 15px; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; transition: all 0.2s; font-weight: 600; }
+        .control-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .control-btn:active { transform: translateY(0); }
+        .btn-forward { background: #3b82f6; color: white; grid-column: 2; }
+        .btn-backward { background: #3b82f6; color: white; grid-column: 2; grid-row: 3; }
+        .btn-left { background: #3b82f6; color: white; grid-column: 1; grid-row: 2; }
+        .btn-right { background: #3b82f6; color: white; grid-column: 3; grid-row: 2; }
+        .btn-rotate-left { background: #8b5cf6; color: white; grid-column: 1; grid-row: 1; }
+        .btn-rotate-right { background: #8b5cf6; color: white; grid-column: 3; grid-row: 1; }
+        .btn-stand-up { background: #22c55e; color: white; grid-column: 1 / 4; margin-top: 10px; }
+        .btn-stand-down { background: #f59e0b; color: white; grid-column: 1 / 4; }
+        .btn-emergency { background: #ef4444; color: white; grid-column: 1 / 4; margin-top: 10px; }
+        .btn-emergency:hover { background: #dc2626; }
+        
+        /* Demo Button */
+        .demo-section { display: flex; gap: 10px; margin-top: 15px; }
+        .btn-demo { flex: 1; padding: 12px; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; font-weight: 600; transition: all 0.2s; }
+        .btn-demo:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .btn-inspection { background: #6366f1; color: white; }
+        .btn-status { background: #10b981; color: white; }
+        
+        /* Table */
         table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e5e7eb; }
-        th { background: #f9fafb; }
-        tr:hover { background: #f9fafb; }
-        .badge { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #e5e7eb; font-size: 13px; }
+        th { background: #f8fafc; font-weight: 600; color: #475569; }
+        tr:hover { background: #f8fafc; }
+        .badge { padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 500; }
         .badge-success { background: #dcfce7; color: #166534; }
         .badge-warning { background: #fef3c7; color: #92400e; }
         .badge-danger { background: #fee2e2; color: #991b1b; }
-        .alert-item { padding: 15px; border-radius: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        
+        /* Alert Items */
+        .alert-item { padding: 12px; border-radius: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
         .alert-item.warn { background: #fef3c7; border-left: 4px solid #f59e0b; }
         .alert-item.critical { background: #fee2e2; border-left: 4px solid #ef4444; }
-        .btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; }
-        .btn-primary { background: #3b82f6; color: white; }
-        .btn-danger { background: #ef4444; color: white; }
-        .empty { color: #999; text-align: center; padding: 20px; }
+        .alert-item.crack { background: #fce7f3; border-left: 4px solid #ec4899; }
+        .alert-info { font-size: 13px; }
+        .alert-time { font-size: 11px; color: #64748b; }
+        .btn-ack { padding: 5px 12px; border: none; border-radius: 5px; background: #e2e8f0; cursor: pointer; font-size: 12px; }
+        .btn-ack:hover { background: #cbd5e1; }
+        
+        /* Empty State */
+        .empty { color: #94a3b8; text-align: center; padding: 30px; font-size: 14px; }
+        
+        /* Video Placeholder */
+        .video-placeholder { background: #1e293b; color: #94a3b8; padding: 40px; text-align: center; border-radius: 8px; margin-bottom: 15px; }
+        .video-placeholder svg { width: 48px; height: 48px; margin-bottom: 10px; }
+        
+        /* Waypoint Progress */
+        .waypoint-progress { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+        .waypoint-dots { display: flex; gap: 5px; }
+        .waypoint-dot { width: 12px; height: 12px; border-radius: 50%; background: #e2e8f0; }
+        .waypoint-dot.active { background: #3b82f6; }
+        .waypoint-dot.completed { background: #22c55e; }
     </style>
 </head>
 <body>
@@ -413,34 +702,124 @@ DASHBOARD_HTML = """
         <div class="status-bar">
             <div class="status-item"><div class="dot" id="connDot"></div><span id="connStatus">未连接</span></div>
             <div class="status-item">📡 <span id="clientCount">0</span> 设备在线</div>
+            <div class="status-item">🕐 <span id="currentTime">--:--:--</span></div>
         </div>
     </div>
     
     <div class="container">
+        <!-- Left Column -->
         <div class="left">
+            <!-- Stats -->
             <div class="stats">
                 <div class="stat-card"><div class="stat-value" id="totalInspections">0</div><div class="stat-label">总巡检次数</div></div>
-                <div class="stat-card" style="background:linear-gradient(135deg,#4facfe,#00f2fe)"><div class="stat-value" id="normalCount">0</div><div class="stat-label">正常检测</div></div>
-                <div class="stat-card" style="background:linear-gradient(135deg,#f093fb,#f5576c)"><div class="stat-value" id="crackCount">0</div><div class="stat-label">裂缝检测</div></div>
-                <div class="stat-card" style="background:linear-gradient(135deg,#fa709a,#fee140)"><div class="stat-value" id="alertCount">0</div><div class="stat-label">待处理告警</div></div>
+                <div class="stat-card"><div class="stat-value" id="normalCount">0</div><div class="stat-label">正常检测</div></div>
+                <div class="stat-card"><div class="stat-value" id="crackCount">0</div><div class="stat-label">裂缝检测</div></div>
+                <div class="stat-card"><div class="stat-value" id="alertCount">0</div><div class="stat-label">待处理告警</div></div>
             </div>
+            
+            <!-- Inspection Records -->
             <div class="panel">
-                <h2>最近巡检记录</h2>
+                <h2>最近巡检记录 <span style="font-size:12px;color:#64748b;font-weight:normal" id="inspectionTime">--</span></h2>
                 <table>
-                    <thead><tr><th>时间</th><th>设备</th><th>裂缝数</th><th>温度状态</th><th>温度值</th></tr></thead>
-                    <tbody id="inspectionTable"><tr><td colspan="5" class="empty">暂无数据</td></tr></tbody>
+                    <thead><tr><th>时间</th><th>设备</th><th>航点</th><th>裂缝数</th><th>温度</th><th>状态</th></tr></thead>
+                    <tbody id="inspectionTable"><tr><td colspan="6" class="empty">暂无数据</td></tr></tbody>
                 </table>
             </div>
-        </div>
-        <div class="right">
-            <div class="panel">
-                <h2>实时告警</h2>
-                <div id="alertList"><p class="empty">暂无告警</p></div>
+            
+            <!-- Video Section -->
+            <div class="panel" style="margin-top:20px">
+                <h2>实时视频流</h2>
+                <div class="video-placeholder">
+                    <svg fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zm12.553 1.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z"/></svg>
+                    <div>视频流暂未连接</div>
+                    <div style="font-size:12px;margin-top:5px">RTSP: rtsp://192.168.1.108:554/id=1&type=0</div>
+                </div>
             </div>
+        </div>
+        
+        <!-- Right Column -->
+        <div class="right">
+            <!-- Robot Status -->
+            <div class="panel">
+                <h2>机器狗状态</h2>
+                <div class="robot-status">
+                    <div class="status-item-detail">
+                        <label>电量</label>
+                        <div class="value" id="batteryValue">100%</div>
+                        <div class="progress-bar"><div class="progress-fill battery" id="batteryBar" style="width:100%"></div></div>
+                    </div>
+                    <div class="status-item-detail">
+                        <label>CPU温度</label>
+                        <div class="value" id="cpuTempValue">35.0℃</div>
+                        <div class="progress-bar"><div class="progress-fill temp" id="cpuTempBar" style="width:35%"></div></div>
+                    </div>
+                    <div class="status-item-detail">
+                        <label>GPU负载</label>
+                        <div class="value" id="gpuLoadValue">0%</div>
+                        <div class="progress-bar"><div class="progress-fill" id="gpuLoadBar" style="width:0%;background:#3b82f6"></div></div>
+                    </div>
+                    <div class="status-item-detail">
+                        <label>内存使用</label>
+                        <div class="value" id="memValue">45%</div>
+                        <div class="progress-bar"><div class="progress-fill" id="memBar" style="width:45%;background:#8b5cf6"></div></div>
+                    </div>
+                    <div class="status-item-detail">
+                        <label>运行状态</label>
+                        <div class="value" id="robotStatusValue">待机</div>
+                    </div>
+                    <div class="status-item-detail">
+                        <label>当前位置</label>
+                        <div class="value" id="positionValue">(0.0, 0.0)</div>
+                    </div>
+                </div>
+                
+                <!-- Waypoint Progress -->
+                <div style="margin-top:15px">
+                    <label style="font-size:12px;color:#64748b">巡检进度</label>
+                    <div class="waypoint-progress">
+                        <div class="waypoint-dots" id="waypointDots">
+                            <div class="waypoint-dot active"></div>
+                            <div class="waypoint-dot"></div>
+                            <div class="waypoint-dot"></div>
+                            <div class="waypoint-dot"></div>
+                            <div class="waypoint-dot"></div>
+                        </div>
+                        <span style="font-size:12px;color:#64748b" id="waypointText">WP001/005</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Motion Control -->
+            <div class="panel" style="margin-top:20px">
+                <h2>运动控制</h2>
+                <div class="control-grid">
+                    <button class="control-btn btn-rotate-left" onclick="sendControl('rotate_left')">↰ 左转</button>
+                    <button class="control-btn btn-forward" onclick="sendControl('forward')">↑ 前</button>
+                    <button class="control-btn btn-rotate-right" onclick="sendControl('rotate_right')">↱ 右转</button>
+                    <button class="control-btn btn-left" onclick="sendControl('left')">← 左</button>
+                    <div style="background:#f1f5f9;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#64748b">停止</div>
+                    <button class="control-btn btn-right" onclick="sendControl('right')">右 →</button>
+                    <button class="control-btn btn-backward" onclick="sendControl('backward')">↓ 后</button>
+                </div>
+                <button class="control-btn btn-stand-up" onclick="sendControl('stand_up')">⬆ 起立</button>
+                <button class="control-btn btn-stand-down" onclick="sendControl('stand_down')">⬇ 趴下</button>
+                <button class="control-btn btn-emergency" onclick="sendControl('emergency_stop')">🛑 急停</button>
+            </div>
+            
+            <!-- Demo Control -->
             <div class="panel" style="margin-top:20px">
                 <h2>演示控制</h2>
-                <button class="btn btn-primary" onclick="sendDemo()" style="width:100%;margin-top:10px;padding:12px">发送演示数据</button>
-                <p style="color:#666;font-size:12px;margin-top:10px;text-align:center">点击按钮模拟巡检数据上报</p>
+                <div class="demo-section">
+                    <button class="btn-demo btn-inspection" onclick="sendDemo()">发送巡检数据</button>
+                    <button class="btn-demo btn-status" onclick="sendDemoStatus()">更新状态</button>
+                </div>
+                <p style="color:#64748b;font-size:12px;margin-top:10px;text-align:center">点击按钮模拟巡检数据上报</p>
+            </div>
+            
+            <!-- Real-time Alarms -->
+            <div class="panel" style="margin-top:20px">
+                <h2>实时告警 <span style="font-size:12px;color:#ef4444;font-weight:normal" id="alertBadge">0</span></h2>
+                <div id="alertList"><p class="empty">暂无告警</p></div>
             </div>
         </div>
     </div>
@@ -449,6 +828,7 @@ DASHBOARD_HTML = """
         let ws = null;
         let inspections = [];
         let alerts = [];
+        let robotStatus = { battery: 100, cpu_temp: 35, gpu_load: 0, memory_usage: 45, status: 'idle', waypoint: 'WP001' };
         
         function connect() {
             const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -463,6 +843,10 @@ DASHBOARD_HTML = """
                 const msg = JSON.parse(e.data);
                 if (msg.type === 'inspection_result') {
                     addInspection(msg.data);
+                } else if (msg.type === 'temperature_alert' || msg.type === 'crack_alert') {
+                    addAlert(msg.data);
+                } else if (msg.type === 'robot_status') {
+                    updateRobotStatus(msg.data);
                 } else if (msg.type === 'stats') {
                     document.getElementById('clientCount').textContent = msg.data.connected_clients;
                 }
@@ -481,7 +865,7 @@ DASHBOARD_HTML = """
             const tempStatus = data.temperature?.status || 'NORMAL';
             const tempValue = (data.temperature?.value || 0).toFixed(1);
             
-            inspections.unshift({ time: now, crackCount, tempStatus, tempValue });
+            inspections.unshift({ time: now, crackCount, tempStatus, tempValue, waypoint: 'WP001' });
             if (inspections.length > 20) inspections.pop();
             updateTable();
             updateStats();
@@ -490,31 +874,160 @@ DASHBOARD_HTML = """
         function updateTable() {
             const tbody = document.getElementById('inspectionTable');
             if (!inspections.length) {
-                tbody.innerHTML = '<tr><td colspan="5" class="empty">暂无数据</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" class="empty">暂无数据</td></tr>';
                 return;
             }
             tbody.innerHTML = inspections.map(i => {
                 const cls = i.tempStatus === 'NORMAL' ? 'badge-success' : i.tempStatus === 'WARN' ? 'badge-warning' : 'badge-danger';
-                return `<tr><td>${i.time}</td><td>LITE3-001</td><td>${i.crackCount}</td><td><span class="badge ${cls}">${i.tempStatus}</span></td><td>${i.tempValue}℃</td></tr>`;
+                return `<tr><td>${i.time}</td><td>LITE3-001</td><td>${i.waypoint}</td><td>${i.crackCount}</td><td><span class="badge ${cls}">${i.tempStatus}</span></td><td>${i.tempValue}℃</td></tr>`;
             }).join('');
         }
         
         function updateStats() {
             document.getElementById('totalInspections').textContent = inspections.length;
             document.getElementById('crackCount').textContent = inspections.filter(i => i.crackCount > 0).length;
+            document.getElementById('inspectionTime').textContent = inspections.length > 0 ? inspections[0].time : '--';
+        }
+        
+        function addAlert(data) {
+            const now = new Date().toLocaleString();
+            const type = data.type || 'temperature';
+            const level = data.level || 'WARN';
+            const value = data.data?.temperature?.max_c || data.data?.width_mm || '--';
+            const unit = type === 'temperature' ? '℃' : 'mm';
+            
+            alerts.unshift({ time: now, type, level, value, unit, id: data.id || Date.now() });
+            if (alerts.length > 10) alerts.pop();
+            updateAlerts();
+        }
+        
+        function updateAlerts() {
+            const container = document.getElementById('alertList');
+            const badge = document.getElementById('alertBadge');
+            const pending = alerts.filter(a => !a.acknowledged);
+            badge.textContent = pending.length;
+            
+            if (!alerts.length) {
+                container.innerHTML = '<p class="empty">暂无告警</p>';
+                return;
+            }
+            
+            container.innerHTML = alerts.map(a => {
+                const cls = a.level === 'CRITICAL' ? 'critical' : a.level === 'WARN' ? 'warn' : 'crack';
+                const typeIcon = a.type === 'temperature' ? '🌡️' : '🔍';
+                return `<div class="alert-item ${cls}">
+                    <div class="alert-info">${typeIcon} ${a.value}${a.unit} (${a.level})</div>
+                    <div style="text-align:right">
+                        <div class="alert-time">${a.time}</div>
+                        <button class="btn-ack" onclick="ackAlert(${a.id})">确认</button>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+        
+        function ackAlert(id) {
+            fetch('/api/alert/ack?alert_id=' + id, {method: 'POST'})
+                .then(r => r.json())
+                .then(() => updateAlerts());
+        }
+        
+        function updateRobotStatus(data) {
+            robotStatus = data;
+            
+            // Battery
+            const batteryEl = document.getElementById('batteryValue');
+            const batteryBar = document.getElementById('batteryBar');
+            batteryEl.textContent = data.battery + '%';
+            batteryBar.style.width = data.battery + '%';
+            batteryEl.className = 'value' + (data.battery < 20 ? ' danger' : data.battery < 50 ? ' warning' : '');
+            batteryBar.className = 'progress-fill battery' + (data.battery < 20 ? ' low' : '');
+            
+            // CPU Temp
+            const cpuTempEl = document.getElementById('cpuTempValue');
+            const cpuTempBar = document.getElementById('cpuTempBar');
+            cpuTempEl.textContent = data.cpu_temp + '℃';
+            cpuTempBar.style.width = Math.min(data.cpu_temp / 100 * 100, 100) + '%';
+            cpuTempEl.className = 'value' + (data.cpu_temp > 60 ? ' danger' : data.cpu_temp > 50 ? ' warning' : '');
+            cpuTempBar.className = 'progress-fill temp' + (data.cpu_temp > 60 ? ' high' : '');
+            
+            // GPU Load
+            document.getElementById('gpuLoadValue').textContent = data.gpu_load + '%';
+            document.getElementById('gpuLoadBar').style.width = data.gpu_load + '%';
+            
+            // Memory
+            document.getElementById('memValue').textContent = data.memory_usage + '%';
+            document.getElementById('memBar').style.width = data.memory_usage + '%';
+            
+            // Status
+            const statusMap = { 'idle': '待机', 'moving': '运动中', 'inspecting': '巡检中', 'charging': '充电中' };
+            document.getElementById('robotStatusValue').textContent = statusMap[data.status] || data.status;
+            
+            // Position
+            if (data.position) {
+                document.getElementById('positionValue').textContent = `(${data.position.x.toFixed(1)}, ${data.position.y.toFixed(1)})`;
+            }
+            
+            // Waypoint
+            if (data.waypoint) {
+                document.getElementById('waypointText').textContent = data.waypoint + '/' + (data.total_waypoints || 5);
+                updateWaypointDots(data.completed_waypoints || 0);
+            }
+        }
+        
+        function updateWaypointDots(completed) {
+            const dots = document.querySelectorAll('.waypoint-dot');
+            dots.forEach((dot, i) => {
+                dot.className = 'waypoint-dot';
+                if (i < completed) dot.classList.add('completed');
+                else if (i === completed) dot.classList.add('active');
+            });
+        }
+        
+        async function sendControl(direction) {
+            try {
+                const resp = await fetch('/api/control/motion?direction=' + direction, {method: 'POST'});
+                const data = await resp.json();
+                console.log('Control sent:', data);
+            } catch (e) {
+                console.error('Control failed:', e);
+                alert('控制发送失败，请检查网络连接');
+            }
         }
         
         async function sendDemo() {
             try {
                 const resp = await fetch('/api/demo/send', {method: 'POST'});
                 const data = await resp.json();
-                console.log('演示数据发送成功', data);
+                console.log('Demo data sent:', data);
             } catch (e) {
-                console.error('发送失败', e);
+                console.error('Demo failed:', e);
             }
         }
         
-        // 启动
+        async function sendDemoStatus() {
+            try {
+                const resp = await fetch('/api/demo/send_status', {method: 'POST'});
+                const data = await resp.json();
+                console.log('Status updated:', data);
+            } catch (e) {
+                console.error('Status update failed:', e);
+            }
+        }
+        
+        // Update clock
+        setInterval(() => {
+            document.getElementById('currentTime').textContent = new Date().toLocaleTimeString();
+        }, 1000);
+        
+        // Poll status
+        setInterval(() => {
+            fetch('/api/robot/status')
+                .then(r => r.json())
+                .then(d => updateRobotStatus(d))
+                .catch(() => {});
+        }, 2000);
+        
+        // Start
         connect();
         setInterval(() => fetch('/api/status').then(r => r.json()).then(d => {
             document.getElementById('alertCount').textContent = d.pending_alerts;
@@ -523,24 +1036,3 @@ DASHBOARD_HTML = """
 </body>
 </html>
 """
-
-
-async def main():
-    """主函数"""
-    # 启动HTTP服务器
-    config = uvicorn.Config(app, host="0.0.0.0", port=HTTP_PORT, log_level="info")
-    server = uvicorn.Server(config)
-    
-    # 启动WebSocket服务器
-    ws_server = await websockets.serve(monitor.handle_client, WS_HOST, WS_PORT)
-    
-    logger.info(f"监测平台启动:")
-    logger.info(f"  HTTP界面: http://0.0.0.0:{HTTP_PORT}")
-    logger.info(f"  WebSocket: ws://0.0.0.0:{WS_PORT}/ws")
-    
-    # 运行HTTP服务器（异步）
-    await server.serve()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
