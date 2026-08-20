@@ -12,7 +12,7 @@
 [![Python](https://img.shields.io/badge/Python-3.8+-green.svg)](https://www.python.org/)
 [![TensorRT](https://img.shields.io/badge/TensorRT-8.x-red.svg)](https://developer.nvidia.com/tensorrt)
 [![Version](https://img.shields.io/badge/Version-1.6-brightgreen.svg)](CHANGELOG.md)
-[![Status](https://img.shields.io/badge/Status-Deployment_Ready-success.svg)](docs/01-技术方案/09-部署指南.md)
+[![Status](https://img.shields.io/badge/Status-Deployment_Ready-success.svg)](docs/01-技术方案/06-部署运维指南.md)
 
 </div>
 
@@ -482,7 +482,6 @@ Session有效期: 30秒（超时自动续期）
 | 05 | [项目代码规范](docs/01-技术方案/05-项目代码规范.md) | V1.3 | 编码规范和Git流程 |
 | 06 | [部署运维指南](docs/01-技术方案/06-部署运维指南.md) | V1.3 | 远程访问、部署流程、故障排查 |
 | 08 | [环境诊断与故障排查指南](docs/01-技术方案/08-环境诊断与故障排查指南.md) | V1.3 | 一键诊断与故障排查 |
-| 09 | [部署指南](docs/01-技术方案/09-部署指南.md) | V1.6 | MobaXterm传输与部署流程 |
 | 10 | [环境配置确认指南](docs/01-技术方案/10-环境配置确认指南.md) | V1.6 | 机器狗环境信息采集与调整 |
 | 11 | [硬件配置评估报告](docs/01-技术方案/12-硬件配置评估报告.md) | V1.6 | GPU环境确认与部署条件评估 |
 
