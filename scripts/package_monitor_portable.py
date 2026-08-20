@@ -20,10 +20,9 @@ def create_portable_package(output_dir: str = "deliverables"):
         ("scripts/start_monitor.py", "scripts/start_monitor.py"),
         ("scripts/start_monitor.sh", "start_monitor.sh"),
         ("scripts/start_monitor.bat", "start_monitor.bat"),
-        ("README_PORTABLE.txt", "README.txt"),
     ]
     
-    # Read README content
+    # README content inline
     readme_content = """Monitor Platform Portable Package
 ==================================
 
