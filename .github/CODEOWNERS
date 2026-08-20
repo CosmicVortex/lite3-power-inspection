@@ -1,0 +1,22 @@
+# 代码所有者
+# 定义各模块的负责人
+
+## 技术方案文档
+docs/01-技术方案/ @cosmicvortex
+
+## 项目管理文档
+docs/02-项目管理/ @cosmicvortex
+
+## 核心代码
+src/app/ @chenzili
+src/perception/ @chenzili
+src/gateway/ @chenwei
+src/services/ @chenwei
+src/storage/ @chenwei
+
+## 测试
+tests/ @chenzili
+
+## 配置
+config/ @chenwei
+scripts/ @chenwei
