@@ -27,6 +27,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
+BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # 日志函数
@@ -50,6 +51,18 @@ log_step() {
     echo -e "\n${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${BOLD}📋 $1${NC}"
     echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+}
+
+# 打印失败详情
+log_fail_detail() {
+    local reason="$1"
+    local solution="$2"
+    echo -e "\n${RED}${BOLD}❌ 执行失败${NC}"
+    echo -e "${RED}原因: $reason${NC}"
+    if [ -n "$solution" ]; then
+        echo -e "${YELLOW}建议: $solution${NC}"
+    fi
+    echo ""
 }
 
 # 默认参数
@@ -101,7 +114,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --help)
-            head -25 "$0" | grep "^#" | sed 's/^# \?//'
+            head -25 "$0" | grep "^#" | sed 's/^#\s*//'
             exit 0
             ;;
         *)
@@ -188,6 +201,31 @@ check_gpu_environment() {
     fi
 }
 
+check_offline_packages() {
+    if [ -z "$OFFLINE_DIR" ]; then
+        log_info "未指定离线包目录"
+        return 1
+    fi
+    
+    local offline_path="$PROJECT_ROOT/$OFFLINE_DIR"
+    if [ ! -d "$offline_path" ]; then
+        log_warn "离线包目录不存在: $offline_path"
+        log_info "请使用 --offline-dir 参数指定正确的路径"
+        return 1
+    fi
+    
+    # 查找wheel包
+    local whl_count=$(find "$offline_path" -name "*.whl" | wc -l)
+    if [ "$whl_count" -gt 0 ]; then
+        log_success "找到 $whl_count 个离线安装包"
+        return 0
+    else
+        log_warn "离线目录中未找到wheel包"
+        log_info "请重新生成离线包: python3 scripts/package_offline.py"
+        return 1
+    fi
+}
+
 check_project_structure() {
     log_step "检查项目结构"
     
@@ -228,34 +266,40 @@ check_config_file() {
         fi
     else
         log_error "配置文件缺失: $config_path"
+        log_info "请复制 config/inspection_config.yaml.example 并重命名为 inspection_config.yaml"
         return 1
     fi
+}
+
+check_python_packages() {
+    log_step "检查Python依赖包"
+    
+    local venv_python="$PROJECT_ROOT/venv/bin/python"
+    if [ ! -f "$venv_python" ]; then
+        venv_python="python3"
+    fi
+    
+    local required_packages=("loguru" "numpy" "cv2" "websockets" "requests" "yaml" "fastapi" "uvicorn" "pydantic")
+    local missing_packages=()
+    
+    for pkg in "${required_packages[@]}"; do
+        if ! $venv_python -c "import $pkg" 2>/dev/null; then
+            log_error "$pkg: 缺失 (必需)"
+            missing_packages+=("$pkg")
+        else
+            log_success "$pkg: 已安装"
+        fi
+    done
+    
+    if [ ${#missing_packages[@]} -gt 0 ]; then
+        log_error "缺少 ${#missing_packages[@]} 个必需包: ${missing_packages[*]}"
+        return 1
+    fi
+    
+    return 0
 }
 
 # ==================== 依赖安装 ====================
-
-check_offline_packages() {
-    if [ -z "$OFFLINE_DIR" ]; then
-        log_info "未指定离线包目录"
-        return 1
-    fi
-    
-    local offline_path="$PROJECT_ROOT/$OFFLINE_DIR"
-    if [ ! -d "$offline_path" ]; then
-        log_warn "离线包目录不存在: $offline_path"
-        return 1
-    fi
-    
-    # 查找wheel包
-    local whl_count=$(find "$offline_path" -name "*.whl" | wc -l)
-    if [ "$whl_count" -gt 0 ]; then
-        log_success "找到 $whl_count 个离线安装包"
-        return 0
-    else
-        log_warn "离线目录中未找到wheel包"
-        return 1
-    fi
-}
 
 create_virtual_environment() {
     log_step "创建虚拟环境"
@@ -429,11 +473,11 @@ main() {
             check_gpu_environment
             check_project_structure
             check_config_file
+            check_python_packages
             ;;
         "install")
             create_virtual_environment
             install_dependencies
-            create_directories
             ;;
         "start")
             start_monitor_platform
@@ -446,8 +490,7 @@ main() {
                     if [ "$FORCE" = true ]; then
                         log_warn "环境检测失败，强制继续..."
                     else
-                        log_error "环境检测未通过，请先解决上述问题"
-                        log_info "使用 --force 参数可强制继续部署"
+                        log_fail_detail "Python版本不满足要求" "请升级Python至3.8以上版本"
                         exit 1
                     fi
                 }
@@ -456,7 +499,7 @@ main() {
                 check_gpu_environment
                 check_project_structure
                 check_config_file || {
-                    log_error "配置文件检查失败"
+                    log_fail_detail "配置文件检查失败" "请检查 config/inspection_config.yaml"
                     exit 1
                 }
             fi
@@ -473,7 +516,7 @@ main() {
                     if [ "$FORCE" = true ]; then
                         log_warn "依赖安装失败，强制继续..."
                     else
-                        log_error "依赖安装失败，请检查网络或离线包"
+                        log_fail_detail "依赖安装失败" "请检查网络连接或使用离线包: --offline-dir ./offline-deploy"
                         exit 1
                     fi
                 }
@@ -487,7 +530,7 @@ main() {
                     if $venv_python -c "import loguru, numpy, cv2, websockets, requests, yaml, fastapi, uvicorn, pydantic" 2>/dev/null; then
                         log_success "所有核心依赖验证通过"
                     else
-                        log_error "依赖验证失败"
+                        log_fail_detail "依赖验证失败" "请重新运行安装脚本"
                         exit 1
                     fi
                 fi
@@ -498,25 +541,19 @@ main() {
                 start_monitor_platform
                 run_demo
             fi
-            
-            # 计算耗时
-            END_TIME=$(date +%s)
-            ELAPSED=$((END_TIME - START_TIME))
-            
-            # 完成
-            echo ""
-            echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-            echo -e "${GREEN}✅ 部署完成${NC}"
-            echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-            echo ""
-            echo -e "${CYAN}访问地址: http://192.168.1.103:8000${NC}"
-            echo -e "${CYAN}查看日志: tail -f $PROJECT_ROOT/data/logs/monitor.log${NC}"
-            echo -e "${CYAN}停止服务: pkill -f start_monitor.py${NC}"
-            echo ""
-            echo -e "部署耗时: ${ELAPSED} 秒"
-            echo ""
             ;;
     esac
+    
+    # 计算耗时
+    END_TIME=$(date +%s)
+    ELAPSED=$((END_TIME - START_TIME))
+    
+    echo ""
+    echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${GREEN}✅ 部署完成${NC}"
+    echo -e "${CYAN}耗时: ${ELAPSED} 秒${NC}"
+    echo -e "${CYAN}访问地址: http://192.168.1.103:8000${NC}"
+    echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
 # 执行主函数
