@@ -1,52 +1,103 @@
-# API接口文档
+# 绝影Lite3 接口协议规范
 
-> **文档编号**: API接口文档  
-> **版本**: V1.6
-> **编制日期**: 2026-08-20
+> **文档编号**: API-PROTOCOL-001  
+> **版本**: V1.7
+> **编制日期**: 2025-09-16
 > **编制人**: 陈伟
+> **适用范围**: 机器狗 → 第三方监测平台数据上报
 
 ---
 
-## 一、WebSocket接口
+## 一、协议概述
 
-### 1.1 连接规范
+### 1.1 设计目标
 
-| 参数 | 值 | 说明 |
-|------|-----|------|
-| 服务端地址 | ws://192.168.1.200:8765/ws | 监测平台WebSocket服务 |
+本协议规范定义绝影Lite3电力巡检系统与第三方监测平台之间的数据通信标准，实现：
+
+1. **双向兼容**: 同时支持内部测试平台与第三方竞赛平台
+2. **标准化**: 统一消息格式、字段定义、错误处理
+3. **可扩展**: 预留扩展字段，支持未来功能升级
+4. **可靠性**: 断网缓存、自动重连、数据补传
+
+### 1.2 通信架构
+
+```mermaid
+graph LR
+    subgraph 机器狗端["绝影Lite3 感知主机"]
+        INS[Inspector] --> WS[WebSocketGateway]
+        WS --> CACHE[(SQLite缓存)]
+    end
+    
+    subgraph 网络层["WiFi 内网"]
+        NW[192.168.1.103:8765]
+    end
+    
+    subgraph 平台端["监测平台"]
+        SERVER[WebSocket Server]
+        PLATFORM[第三方平台]
+    end
+    
+    WS --> NW
+    NW --> SERVER
+    SERVER --> PLATFORM
+    
+    CACHE -.->|断网缓存| WS
+```
+
+### 1.3 连接信息
+
+| 配置项 | 值 | 说明 |
+|--------|-----|------|
+| 服务端地址 | `ws://192.168.1.200:8765/ws` | 默认配置，可通过配置文件修改 |
+| 本地地址 | `0.0.0.0:8765` | 机器狗本地监听 |
 | 协议版本 | WebSocket RFC 6455 | 标准WebSocket协议 |
+| 编码格式 | UTF-8 JSON | 所有消息为JSON格式 |
 | 心跳间隔 | 30秒 | 客户端主动发送心跳 |
 | 超时设置 | 60秒无响应视为断连 | 自动重连机制 |
 
-### 1.2 消息格式
+---
 
-所有消息采用JSON编码，包含以下公共字段：
+## 二、消息格式规范
+
+### 2.1 公共字段
+
+所有消息必须包含以下公共字段：
 
 ```json
 {
-  "msgId": "uuid-v4",
-  "ts": 1735668123456,
-  "deviceId": "LITE3-001",
-  "type": "message_type",
-  "payload": { ... }
+  "msgId": "string",        // 消息唯一标识（UUID v4）
+  "ts": 1735668123456,      // 时间戳（毫秒）
+  "deviceId": "string",     // 设备ID（默认 LITE3-001）
+  "type": "string",         // 消息类型
+  "payload": {}             // 消息数据体
 }
 ```
 
-**字段说明**：
-
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `msgId` | string | ✅ | UUID v4，消息唯一标识 |
-| `ts` | integer | ✅ | 时间戳（毫秒） |
-| `deviceId` | string | ✅ | 设备ID，默认 `LITE3-001` |
-| `type` | string | ✅ | 消息类型：`inspection_result` / `temperature_alert` / `heartbeat` |
-| `payload` | object | ✅ | 消息数据体 |
+| `msgId` | string | ✅ | UUID v4格式，用于消息去重和追踪 |
+| `ts` | integer | ✅ | 消息生成时的时间戳（毫秒级） |
+| `deviceId` | string | ✅ | 设备唯一标识，默认 `LITE3-001` |
+| `type` | string | ✅ | 消息类型，见2.2节 |
+| `payload` | object | ✅ | 消息具体内容，类型相关字段 |
 
-> **注意**: 服务端同时兼容 `data` 和 `payload` 字段，建议统一使用 `payload`。
+### 2.2 消息类型定义
 
-### 1.3 消息类型定义
+| 消息类型 | 说明 | 触发条件 |
+|----------|------|----------|
+| `inspection_result` | 巡检结果上报 | 检测到裂缝或异常时 |
+| `temperature_alert` | 温度告警上报 | 温度超过阈值时 |
+| `crack_alert` | 裂缝告警上报 | 检测到≥0.1mm裂缝时 |
+| `system_status` | 系统状态上报 | 定时上报（每5秒） |
+| `heartbeat` | 心跳包 | 每30秒发送一次 |
 
-#### 1.3.1 巡检结果上报 (inspection_result)
+---
+
+## 三、消息类型详解
+
+### 3.1 巡检结果上报 (inspection_result)
+
+**触发时机**: 完成一个检测点巡检后上报
 
 ```json
 {
@@ -71,8 +122,8 @@
       "zoom_level": 10
     },
     "confidence": 0.92,
-    "snapshot_url": "http://192.168.1.103:8080/snap/ALT-20260818-001.jpg",
-    "waypoint_id": "WP-03",
+    "snapshot_url": "http://192.168.1.103:8080/snap/CRACK-WP001-1735668123456.jpg",
+    "waypoint_id": "WP001",
     "ptz_state": {
       "yaw": 45.0,
       "pitch": -30.0,
@@ -82,7 +133,34 @@
 }
 ```
 
-#### 1.3.2 温度告警上报 (temperature_alert)
+**payload字段说明**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `defect_type` | string | ✅ | 缺陷类型: `crack`(裂缝), `honeycomb`(蜂窝麻面) |
+| `subtype` | string | ✅ | 缺陷子类型: `longitudinal`(纵向), `transverse`(横向), `network`(网状) |
+| `location` | object | ✅ | 位置信息 |
+| `location.image_x` | integer | ✅ | 图像X坐标(像素) |
+| `location.image_y` | integer | ✅ | 图像Y坐标(像素) |
+| `location.world_x` | float | ✅ | 世界坐标X(米) |
+| `location.world_y` | float | ✅ | 世界坐标Y(米) |
+| `location.world_theta` | float | ✅ | 朝向角(弧度) |
+| `measurements` | object | ✅ | 测量结果 |
+| `measurements.width_mm` | float | ✅ | 裂缝宽度(mm) |
+| `measurements.length_mm` | float | ✅ | 裂缝长度(mm) |
+| `measurements.pixel_precision` | float | ✅ | 像素精度(mm/px)，默认0.019 |
+| `measurements.zoom_level` | integer | ✅ | 变焦倍数，默认10 |
+| `confidence` | float | ✅ | 检测置信度(0-1) |
+| `snapshot_url` | string | ✅ | 检测图片URL |
+| `waypoint_id` | string | ✅ | 航点ID |
+| `ptz_state` | object | ✅ | 云台状态 |
+| `ptz_state.yaw` | float | ✅ | 偏航角(度) |
+| `ptz_state.pitch` | float | ✅ | 俯仰角(度) |
+| `ptz_state.zoom` | integer | ✅ | 变焦倍数 |
+
+### 3.2 温度告警上报 (temperature_alert)
+
+**触发时机**: 温度超过预警或告警阈值时
 
 ```json
 {
@@ -92,7 +170,7 @@
   "type": "temperature_alert",
   "payload": {
     "alert_level": "CRITICAL",
-    "alert_id": "ALT-20260818-002",
+    "alert_id": "ALT-20250916-001",
     "temperature": {
       "max_c": 52.3,
       "avg_c": 38.2,
@@ -110,356 +188,279 @@
     },
     "hotspot_ratio": 0.12,
     "temperature_rate": 3.2,
-    "thermal_snapshot_url": "http://192.168.1.103:8080/thermal/ALT-20260818-002.jpg",
+    "thermal_snapshot_url": "http://192.168.1.103:8080/thermal/ALT-20250916-001.jpg",
+    "waypoint_id": "WP004",
     "ptz_state": {
-      "yaw": 15.0,
-      "pitch": -10.0,
+      "yaw": 135.0,
+      "pitch": -45.0,
       "zoom": 5
     }
   }
 }
 ```
 
-#### 1.3.3 状态心跳 (heartbeat)
+**payload字段说明**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `alert_level` | string | ✅ | 告警等级: `NORMAL`, `WARN`, `CRITICAL` |
+| `alert_id` | string | ✅ | 告警唯一标识 |
+| `temperature` | object | ✅ | 温度数据 |
+| `temperature.max_c` | float | ✅ | 最高温度(℃) |
+| `temperature.avg_c` | float | ✅ | 平均温度(℃) |
+| `temperature.min_c` | float | ✅ | 最低温度(℃) |
+| `roi` | object | ✅ | 感兴趣区域 |
+| `roi.image_x` | integer | ✅ | ROI左上角X坐标 |
+| `roi.image_y` | integer | ✅ | ROI左上角Y坐标 |
+| `roi.width` | integer | ✅ | ROI宽度(像素) |
+| `roi.height` | integer | ✅ | ROI高度(像素) |
+| `thresholds` | object | ✅ | 告警阈值 |
+| `thresholds.warn` | float | ✅ | 预警阈值(℃)，默认45.0 |
+| `thresholds.critical` | float | ✅ | 告警阈值(℃)，默认50.0 |
+| `hotspot_ratio` | float | ✅ | 热点区域占比(0-1) |
+| `temperature_rate` | float | ✅ | 升温速率(℃/min) |
+| `thermal_snapshot_url` | string | ✅ | 热成像截图URL |
+| `waypoint_id` | string | ✅ | 航点ID |
+| `ptz_state` | object | ✅ | 云台状态(同3.1节) |
+
+### 3.3 裂缝告警上报 (crack_alert)
+
+**触发时机**: 检测到≥0.1mm裂缝时（区别于inspection_result，专用于告警）
 
 ```json
 {
   "msgId": "c3d4e5f6-a7b8-9012-cdef-123456789012",
   "ts": 1735668240000,
   "deviceId": "LITE3-001",
-  "type": "heartbeat",
+  "type": "crack_alert",
+  "payload": {
+    "alert_id": "CRACK-WP002-INS001",
+    "waypoint_id": "WP002",
+    "width_mm": 0.15,
+    "length_mm": 45.2,
+    "confidence": 0.87,
+    "snapshot_url": "http://192.168.1.103:8080/snap/CRACK-WP002-1735668240000.jpg",
+    "ptz_state": {
+      "yaw": 90.0,
+      "pitch": -25.0,
+      "zoom": 10
+    }
+  }
+}
+```
+
+**payload字段说明**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `alert_id` | string | ✅ | 告警唯一标识 |
+| `waypoint_id` | string | ✅ | 航点ID |
+| `width_mm` | float | ✅ | 裂缝宽度(mm)，≥0.1mm触发 |
+| `length_mm` | float | ✅ | 裂缝长度(mm) |
+| `confidence` | float | ✅ | 检测置信度 |
+| `snapshot_url` | string | ✅ | 检测图片URL |
+| `ptz_state` | object | ✅ | 云台状态(同3.1节) |
+
+### 3.4 系统状态上报 (system_status)
+
+**触发时机**: 每5秒定时上报
+
+```json
+{
+  "msgId": "d4e5f6a7-b8c9-0123-defa-234567890123",
+  "ts": 1735668300000,
+  "deviceId": "LITE3-001",
+  "type": "system_status",
   "payload": {
     "battery": 85,
     "cpu_temp": 52.3,
     "gpu_load": 45,
     "memory_usage": 62,
     "fps": 15,
-    "network_latency": 3
+    "network_latency": 3,
+    "status": "inspecting",
+    "current_waypoint": "WP003",
+    "total_waypoints": 5,
+    "completed_waypoints": 2,
+    "uptime_seconds": 3600
   }
 }
 ```
 
----
+**payload字段说明**:
 
-## 二、HTTP REST接口
-
-### 2.1 云台控制接口
-
-**基础URL**: `http://192.168.1.108/merlin`
-
-#### 2.1.1 登录认证
-
-```http
-GET /Login.cgi?Type=WEB&Expires=30 HTTP/1.1
-Host: 192.168.1.108
-Authorization: Basic ***
-```
-
-响应：
-```
-HTTP/1.1 200 OK
-Set-Cookie: MerlinSession=abc123xyz; Path=/merlin
-Content-Type: text/plain
-
-OK
-```
-
-#### 2.1.2 心跳保持
-
-```http
-GET /Heartbeat.cgi HTTP/1.1
-Host: 192.168.1.108
-Cookie: MerlinSession=abc123xyz
-```
-
-#### 2.1.3 角度控制
-
-```http
-POST /SetPtzangle.cgi HTTP/1.1
-Host: 192.168.1.108
-Content-Type: application/json
-Cookie: MerlinSession=abc123xyz
-
-{
-  "Angle": {
-    "yaw": 45.0,
-    "pitch": -30.0,
-    "roll": 0.0
-  }
-}
-```
-
-响应：
-```json
-{"Status": "OK", "Angle": {"yaw": 45.0, "pitch": -30.0}}
-```
-
-#### 2.1.4 变倍控制
-
-```http
-GET /ZoomCtrl.cgi?zoom=10 HTTP/1.1
-Host: 192.168.1.108
-Cookie: MerlinSession=abc123xyz
-```
-
-#### 2.1.5 状态查询
-
-```http
-GET /GetFlyStateInfo.cgi HTTP/1.1
-Host: 192.168.1.108
-Cookie: MerlinSession=abc123xyz
-```
-
-响应：
-```json
-{
-  "Zoom": {"zoom": 10},
-  "Angle": {"yaw": 45.0, "pitch": -30.0, "roll": 0.0},
-  "Status": "OK"
-}
-```
-
-#### 2.1.6 方向控制
-
-```http
-POST /SetPtzDirection.cgi HTTP/1.1
-Host: 192.168.1.108
-Content-Type: application/json
-Cookie: MerlinSession=abc123xyz
-
-{
-  "Direction": {
-    "ptz_opt": "up",
-    "speed": 20
-  }
-}
-```
-
-**支持的方向参数**：
-| ptz_opt | 说明 |
-|---------|------|
-| left-up | 左上 |
-| right-down | 右下 |
-| left-down | 左下 |
-| right-up | 右上 |
-| left | 左 |
-| right | 右 |
-| up | 上 |
-| down | 下 |
-| stop | 停止 |
-
-#### 2.1.7 电机使能
-
-```http
-POST /SetPtzAbility.cgi HTTP/1.1
-Host: 192.168.1.108
-Content-Type: application/json
-Cookie: MerlinSession=abc123xyz
-
-{
-  "Motor": {
-    "Enable": 2
-  }
-}
-```
-
-**Enable参数说明**：
-| 值 | 说明 |
-|----|------|
-| 0 | 关闭电机 |
-| 1 | 启动电机 |
-| 2 | 重启电机 |
-
-#### 2.1.8 云台控制（PtzCtrl）
-
-```http
-GET /PtzCtrl.cgi?Operation=2&Speed=20 HTTP/1.1
-Host: 192.168.1.108
-Cookie: MerlinSession=abc123xyz
-```
-
-**操作码说明**：
-| 值 | 说明 |
-|----|------|
-| 0 | 停止云台操作 |
-| 1 | 左上 |
-| 2 | 上 |
-| 3 | 右上 |
-| 4 | 左 |
-| 5 | 右 |
-| 6 | 左下 |
-| 7 | 下 |
-| 8 | 右下 |
-| 9 | 变倍+ |
-| 10 | 变倍- |
-| 11 | 变焦+ |
-| 12 | 变焦- |
-| 13 | 光圈+ |
-| 14 | 光圈- |
-| 20 | 转到预置点 |
-
-### 2.2 快照获取接口
-
-```http
-GET http://192.168.1.103:8080/snap/{alert_id}.jpg
-GET http://192.168.1.103:8080/thermal/{alert_id}.jpg
-```
-
----
-
-## 三、UDP指令集
-
-### 3.1 指令格式规范
-
-**简单指令**（12字节）：
-```
-[offset 0-3]   指令码 (uint32_t, 小端序)
-[offset 4-7]   指令值 (uint32_t, 小端序)
-[offset 8-11]  指令类型 (uint32_t, 0=简单, 1=复杂)
-```
-
-**复杂指令**（最大268字节）：
-```
-[offset 0-3]   指令码 (uint32_t)
-[offset 4-7]   指令值 (uint32_t)
-[offset 8-11]  指令类型 (uint32_t, 固定为1)
-[offset 12-N]  载荷数据 (N-12字节)
-```
-
-### 3.2 运动控制指令
-
-| 指令名称 | 指令码 | 指令值 | 载荷格式 | 说明 |
-|----------|--------|--------|----------|------|
-| 心跳 | 0x21040001 | 0 | - | 维持通信链路，周期≤500ms |
-| 起立 | 0x21010202 | 0 | - | 从趴下切换到站立 |
-| 趴下 | 0x21010202 | 1 | - | 从站立切换到趴下 |
-| 软急停 | 0x21020C0E | 0 | - | 紧急停止，可恢复 |
-| 硬急停 | 0x21020C0F | 0 | - | 立即切断电机动力 |
-| 回零 | 0x21010C05 | 0 | - | 关节回归零位 |
-| 进入AI模式 | 0x21010528 | 0 | - | 允许外部控制 |
-| 退出AI模式 | 0x2101052B | 0 | - | 切换回自主模式 |
-
-### 3.3 速度控制指令
-
-**指令码**: 0x0103  
-**载荷格式**: `[vx:float32][vy:float32][vw:float32]`
-
-| 字段 | 范围 | 单位 | 说明 |
+| 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| vx | -1.0 ~ 1.0 | m/s | 前后速度，正=前 |
-| vy | -1.0 ~ 1.0 | m/s | 左右速度，正=左 |
-| vw | -1.0 ~ 1.0 | rad/s | 旋转速度，正=逆时针 |
+| `battery` | integer | ✅ | 电池电量(%) |
+| `cpu_temp` | float | ✅ | CPU温度(℃) |
+| `gpu_load` | integer | ✅ | GPU负载(%) |
+| `memory_usage` | integer | ✅ | 内存使用率(%) |
+| `fps` | integer | ✅ | 当前处理帧率 |
+| `network_latency` | integer | ✅ | 网络延迟(ms) |
+| `status` | string | ✅ | 系统状态: `idle`, `inspecting`, `moving`, `charging` |
+| `current_waypoint` | string | ✅ | 当前航点ID |
+| `total_waypoints` | integer | ✅ | 总航点数 |
+| `completed_waypoints` | integer | ✅ | 已完成航点数 |
+| `uptime_seconds` | integer | ✅ | 系统运行时长(秒) |
 
-### 3.4 关节角度指令
+### 3.5 心跳包 (heartbeat)
 
-**指令码**: 0x0104  
-**载荷格式**: `[q1:float32][q2:float32]...[q12:float32]`
+**触发时机**: 每30秒发送一次，维持连接
 
-关节顺序：
-```
-q1=HipX_L, q2=HipY_L, q3=Knee_L,  q4=HipX_R, q5=HipY_R, q6=Knee_R
-q7=HipX_FL, q8=HipY_FL, q9=Knee_FL, q10=HipX_FR, q11=HipY_FR, q12=Knee_FR
-```
-
----
-
-## 四、RTSP视频流
-
-### 4.1 流地址定义
-
-| 流类型 | URL格式 | 分辨率 | 帧率 | 用途 |
-|--------|---------|--------|------|------|
-| 可见光主码流 | `rtsp://admin:123456@192.168.1.108:554/id=1&type=0` | 3840×2160 | 15fps | 裂缝检测推理 |
-| 可见光辅码流 | `rtsp://admin:123456@192.168.1.108:554/id=1&type=1` | 640×480 | 10fps | 低带宽预览 |
-| 热成像码流 | `rtsp://admin:123456@192.168.1.108:554/id=2&type=0` | 640×512 | 9fps | 温度监测 |
-
-### 4.2 拉流示例
-
-```python
-import cv2
-
-# 可见光主码流
-cap_visible = cv2.VideoCapture(
-    "rtsp://admin:123456@192.168.1.108:554/id=1&type=0"
-)
-
-# 热成像码流
-cap_thermal = cv2.VideoCapture(
-    "rtsp://admin:123456@192.168.1.108:554/id=2&type=0"
-)
-
-# 读取帧
-ret, visible_frame = cap_visible.read()
-ret, thermal_frame = cap_thermal.read()
+```json
+{
+  "msgId": "e5f6a7b8-c9d0-1234-efab-345678901234",
+  "ts": 1735668360000,
+  "deviceId": "LITE3-001",
+  "type": "heartbeat",
+  "payload": {}
+}
 ```
 
 ---
 
-## 五、网络配置
+## 四、错误处理
 
-| 设备 | IP地址 | 备注 |
-|------|--------|------|
-|| 绝影Lite3机器狗 | 192.168.1.103 | 静态IP，WiFi接入 |
-| 双光谱云台相机 | 192.168.1.108 | 静态IP，出厂默认 |
-| 监测平台 | 192.168.1.200 | 第三方提供 |
-| 赛场路由器 | 192.168.1.1 | DHCP关闭，静态分配 |
+### 4.1 错误响应格式
 
-## 六、错误码定义
+```json
+{
+  "type": "error",
+  "error_code": 1001,
+  "error_msg": "连接超时",
+  "ts": 1735668123456
+}
+```
+
+### 4.2 错误码定义
 
 | 错误码 | 含义 | 处理建议 | 责任方 |
 |--------|------|----------|--------|
 | 0 | 成功 | - | - |
 | 1001 | 连接超时 | 检查网络连通性 | 网络运维 |
-| 1002 | Session过期 | 重新登录获取新Session | 应用开发 |
-| 1003 | 指令无效 | 检查指令码和参数 | 应用开发 |
-| 1004 | 参数越界 | 检查参数范围限制 | 应用开发 |
-| 1005 | 云台忙 | 等待云台动作完成 | 应用开发 |
-| 2001 | 相机离线 | 检查云台电源和网络 | 硬件运维 |
-| 2002 | RTSP流断开 | 重连RTSP流 | 应用开发 |
-| 2003 | 解码失败 | 检查码流格式 | 应用开发 |
-| 3001 | 内存不足 | 释放缓存或重启服务 | 系统运维 |
-| 3002 | 模型加载失败 | 检查模型文件路径 | 应用开发 |
-| 3003 | GPU推理失败 | 检查TensorRT引擎 | 应用开发 |
+| 1002 | Session过期 | 重新建立连接 | 应用开发 |
+| 1003 | 消息格式错误 | 检查JSON格式和必填字段 | 应用开发 |
+| 1004 | 未知消息类型 | 检查type字段值 | 应用开发 |
+| 1005 | 字段缺失 | 补充必填字段 | 应用开发 |
+| 2001 | 设备离线 | 检查设备状态和网络 | 硬件运维 |
+| 2002 | 存储空间不足 | 清理历史数据 | 系统运维 |
+| 3001 | 消息队列满 | 降低上报频率 | 应用开发 |
 
 ---
 
-*文档版本: V1.6 | 编制日期: 2026-08-20 | 编制人: 陈伟*
+## 五、兼容性说明
 
----
+### 5.1 字段兼容性
 
-## 附录：模拟模式说明
+服务端同时兼容以下两种字段命名风格：
 
-### A.1 无模型运行支持
+| 推荐字段 | 兼容字段 | 说明 |
+|----------|----------|------|
+| `payload` | `data` | 消息数据体 |
+| `deviceId` | `device_id` | 设备ID |
+| `msgId` | `msg_id` | 消息ID |
 
-当模型文件（`.trt` / `.onnx`）不存在时，系统自动进入**模拟模式**：
+**建议**: 统一使用驼峰命名（`payload`, `deviceId`, `msgId`）
 
-| 模块 | 模拟行为 |
-|------|----------|
-| YOLODetector | 生成符合规范的随机检测结果 |
-| TensorRTModel | 返回随机推理输出 |
-| SnapshotServer | 生成测试图片 |
-| SimulationGenerator | 按预设脚本生成测试数据 |
+### 5.2 平台配置
 
-### A.2 切换模式
+系统支持通过配置文件切换目标平台：
 
-```bash
-# 模拟模式（默认）
-python3 scripts/run_demo.py --mode simulation
-
-# 真实模式（需模型文件）
-python3 scripts/run_demo.py --mode real
+```yaml
+# config/inspection_config.yaml
+communication:
+  websocket:
+    # 内部测试平台
+    server_url: "ws://192.168.1.103:8765/ws"
+    # 第三方竞赛平台（默认）
+    # server_url: "ws://192.168.1.200:8765/ws"
 ```
 
-### A.3 模拟数据规范
+---
 
-**裂缝检测**：
-- 置信度范围：0.7 ~ 0.95
-- 宽度范围：0.1 ~ 0.5mm（符合≥0.1mm要求）
-- 长度范围：10 ~ 100mm
-- 像素精度：0.019mm/px
+## 六、使用示例
 
-**温度监测**：
-- 基础温度：38 ~ 44℃
-- 目标温度：40 ~ 52℃
-- 升温速率：2.0 ~ 4.0℃/min
-- 告警阈值：WARN≥45℃ / CRITICAL≥50℃
+### 6.1 机器狗端发送代码
+
+```python
+from src.gateway.websocket_client import WebSocketGateway
+
+# 初始化网关
+gateway = WebSocketGateway(
+    server_url="ws://192.168.1.200:8765/ws",
+    device_id="LITE3-001"
+)
+
+# 连接服务端
+await gateway.connect()
+
+# 发送巡检结果
+await gateway.send_inspection_result({
+    "defect_type": "crack",
+    "subtype": "longitudinal",
+    "location": {"image_x": 120, "image_y": 340, "world_x": 0.82, "world_y": 1.10, "world_theta": 0.52},
+    "measurements": {"width_mm": 0.12, "length_mm": 23.4, "pixel_precision": 0.019, "zoom_level": 10},
+    "confidence": 0.92,
+    "snapshot_url": "http://192.168.1.103:8080/snap/CRACK-WP001.jpg",
+    "waypoint_id": "WP001",
+    "ptz_state": {"yaw": 45.0, "pitch": -30.0, "zoom": 10}
+})
+
+# 发送温度告警
+await gateway.send_temperature_alert({
+    "alert_level": "CRITICAL",
+    "alert_id": "ALT-20250916-001",
+    "temperature": {"max_c": 52.3, "avg_c": 38.2, "min_c": 25.1},
+    "roi": {"image_x": 100, "image_y": 200, "width": 50, "height": 50},
+    "thresholds": {"warn": 45.0, "critical": 50.0},
+    "hotspot_ratio": 0.12,
+    "temperature_rate": 3.2,
+    "thermal_snapshot_url": "http://192.168.1.103:8080/thermal/ALT-001.jpg",
+    "waypoint_id": "WP004",
+    "ptz_state": {"yaw": 135.0, "pitch": -45.0, "zoom": 5}
+})
+
+# 断开连接
+await gateway.disconnect()
+```
+
+### 6.2 监测平台接收代码（Node.js）
+
+```javascript
+const WebSocket = require('ws');
+
+const ws = new WebSocket('ws://192.168.1.103:8765');
+
+ws.on('message', (data) => {
+    const msg = JSON.parse(data);
+    
+    switch(msg.type) {
+        case 'inspection_result':
+            console.log('巡检结果:', msg.payload);
+            break;
+        case 'temperature_alert':
+            console.log('温度告警:', msg.payload.alert_level, msg.payload.temperature.max_c + '℃');
+            break;
+        case 'system_status':
+            console.log('系统状态:', msg.payload.status);
+            break;
+        case 'heartbeat':
+            // 心跳，无需处理
+            break;
+    }
+});
+```
+
+---
+
+## 七、版本历史
+
+| 版本 | 日期 | 更新内容 |
+|------|------|----------|
+| V1.0 | 2026-03-01 | 初版规范 |
+| V1.5 | 2026-08-15 | 增加crack_alert类型，完善字段定义 |
+| V1.7 | 2025-09-16 | 统一命名规范，增加双平台兼容说明 |
+
+---
+
+*文档版本: V1.7 | 最后更新: 2025-09-16 | 编制人: 陈伟*
