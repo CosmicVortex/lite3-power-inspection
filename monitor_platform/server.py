@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-绝影Lite3 监测平台 - 设计稿还原版
+绝影Lite3 监测平台 - 按设计稿还原版
 """
 
 import asyncio, json, time, logging, struct, socket, base64
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 import uvicorn
 
@@ -138,21 +138,22 @@ body {
     min-height: 100vh;
 }
 
-/* 顶部导航 */
+/* ========== 顶部导航栏 - 按设计稿1:1还原 ========== */
 .topbar {
     background: #fff;
     border-bottom: 1px solid #e8e8e8;
-    padding: 0 24px;
     height: 56px;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    padding: 0 24px;
     box-shadow: 0 1px 4px rgba(0,0,0,0.06);
     position: sticky;
     top: 0;
     z-index: 100;
 }
 
+/* 左侧标题 */
 .topbar-left {
     display: flex;
     align-items: center;
@@ -172,39 +173,139 @@ body {
 }
 
 .topbar-title {
-    font-size: 16px;
-    font-weight: 500;
-    color: #1a1a1a;
+    font-size: 18px;
+    font-weight: 600;
+    color: #000;
+    letter-spacing: 0.5px;
 }
 
+/* 右侧功能区 */
 .topbar-right {
     display: flex;
     align-items: center;
-    gap: 20px;
+    gap: 24px;
+}
+
+/* 天气小组件 */
+.weather-widget {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: #fffbe6;
+    border: 1px solid #ffe58f;
+    border-radius: 20px;
+    font-size: 13px;
+    color: #8c6d1a;
+}
+
+.weather-icon {
+    font-size: 16px;
+}
+
+/* 时间显示 */
+.time-widget {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     font-size: 13px;
     color: #666;
 }
 
-.status-indicator {
+.time-icon {
+    font-size: 14px;
+}
+
+/* 通知铃铛 */
+.notification-widget {
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 6px;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: #e6f7ff;
+    border: 1px solid #91d5ff;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
 }
 
-.status-dot {
-    width: 8px;
-    height: 8px;
+.notification-widget:hover {
+    background: #bae7ff;
+}
+
+.bell-icon {
+    font-size: 16px;
+    color: #1890ff;
+}
+
+.notification-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 18px;
+    height: 18px;
+    background: #ff4d4f;
+    border: 2px solid #fff;
+    border-radius: 9px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+}
+
+/* 用户资料 */
+.user-widget {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px 4px 4px;
+    background: #fafafa;
+    border: 1px solid #e8e8e8;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.user-widget:hover {
+    background: #f0f0f0;
+    border-color: #d9d9d9;
+}
+
+.user-avatar {
+    width: 28px;
+    height: 28px;
+    background: linear-gradient(135deg, #1890ff, #096dd9);
     border-radius: 50%;
-    background: #d9d9d9;
-    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 14px;
 }
 
-.status-dot.online {
-    background: #52c41a;
-    box-shadow: 0 0 0 3px rgba(82, 196, 26, 0.15);
+.user-info {
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
 
-/* 页面主体 */
+.user-name {
+    font-size: 13px;
+    color: #333;
+    font-weight: 500;
+}
+
+.user-arrow {
+    font-size: 10px;
+    color: #999;
+}
+
+/* ========== 页面主体 ========== */
 .page-container {
     max-width: 1400px;
     margin: 0 auto;
@@ -288,12 +389,6 @@ body {
     border-radius: 20px;
     font-size: 12px;
     color: #52c41a;
-}
-
-.status-tag.offline {
-    background: #fff2f0;
-    border-color: #ffa39e;
-    color: #ff4d4f;
 }
 
 .robot-info-body {
@@ -515,11 +610,6 @@ body {
     opacity: 0.5;
 }
 
-.video-placeholder .info {
-    font-size: 12px;
-    color: #bfbfbf;
-}
-
 /* 控制按钮 */
 .control-grid {
     display: grid;
@@ -572,11 +662,6 @@ body {
     color: #fff;
 }
 
-.ctrl-btn.danger:hover {
-    background: #ff7875;
-    border-color: #ff7875;
-}
-
 .action-buttons {
     display: flex;
     flex-direction: column;
@@ -607,7 +692,6 @@ body {
 .action-btn.down { border-left: 3px solid #faad14; }
 .action-btn.emergency { border-left: 3px solid #ff4d4f; color: #ff4d4f; }
 
-/* 演示按钮 */
 .demo-buttons {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -631,7 +715,6 @@ body {
     background: #f9f0ff;
 }
 
-/* 告警列表 */
 .alert-list {
     max-height: 200px;
     overflow-y: auto;
@@ -659,36 +742,59 @@ body {
 .alert-text { color: #595959; }
 .alert-time { color: #bfbfbf; font-size: 11px; }
 
-/* 空状态 */
 .empty-state {
     text-align: center;
     padding: 40px;
     color: #bfbfbf;
 }
 
-/* 响应式 */
 @media (max-width: 1200px) {
     .main-layout { grid-template-columns: 1fr; }
     .robot-info-body { grid-template-columns: 1fr; }
     .robot-image { width: 100%; height: 160px; border-right: none; border-bottom: 1px solid #f0f0f0; }
     .robot-details { grid-template-columns: repeat(2, 1fr); }
+    .topbar-right { gap: 16px; }
+    .weather-widget, .time-widget { display: none; }
 }
 </style>
 </head>
 <body>
-    <!-- 顶部导航 -->
+    <!-- 顶部导航栏 - 按设计稿1:1还原 -->
     <div class="topbar">
+        <!-- 左侧标题 -->
         <div class="topbar-left">
             <div class="topbar-logo">🤖</div>
-            <span class="topbar-title">绝影Lite3 监测平台</span>
+            <span class="topbar-title">巡检监控中心</span>
         </div>
+        
+        <!-- 右侧功能区 -->
         <div class="topbar-right">
-            <div class="status-indicator">
-                <div class="status-dot" id="connDot"></div>
-                <span id="connStatus">未连接</span>
+            <!-- 天气小组件 -->
+            <div class="weather-widget">
+                <span class="weather-icon">☀️</span>
+                <span>25°C</span>
             </div>
-            <div class="status-indicator">📡 <span id="clientCount">0</span> 在线</div>
-            <div class="status-indicator">🕐 <span id="currentTime">--:--:--</span></div>
+            
+            <!-- 时间显示 -->
+            <div class="time-widget">
+                <span class="time-icon">🕐</span>
+                <span id="currentTime">2025-05-28 10:24:36</span>
+            </div>
+            
+            <!-- 通知铃铛 -->
+            <div class="notification-widget" onclick="showNotifications()">
+                <span class="bell-icon">🔔</span>
+                <span class="notification-badge" id="alertBadge">5</span>
+            </div>
+            
+            <!-- 用户资料 -->
+            <div class="user-widget" onclick="showUserMenu()">
+                <div class="user-avatar">👤</div>
+                <div class="user-info">
+                    <span class="user-name">管理员</span>
+                    <span class="user-arrow">▼</span>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -706,7 +812,7 @@ body {
         <div class="robot-info-card">
             <div class="robot-info-header">
                 <div class="robot-name">机器狗 #02</div>
-                <div class="status-tag" id="onlineTag">
+                <div class="status-tag">
                     <span>●</span> 在线
                 </div>
             </div>
@@ -825,7 +931,7 @@ body {
                         <div class="video-placeholder">
                             <div class="icon">📹</div>
                             <div>视频流暂未连接</div>
-                            <div class="info" style="margin-top:8px">RTSP: rtsp://192.168.1.108:554/id=1&type=0</div>
+                            <div style="font-size:12px;color:#bfbfbf;margin-top:8px">RTSP: rtsp://192.168.1.108:554/id=1&type=0</div>
                         </div>
                     </div>
                 </div>
@@ -893,7 +999,7 @@ body {
                 <!-- 实时告警 -->
                 <div class="panel" style="margin-top:16px">
                     <div class="panel-header">
-                        <div class="panel-title">实时告警 <span style="color:#ff4d4f;font-size:12px;margin-left:auto" id="alertBadge">0</span></div>
+                        <div class="panel-title">实时告警</div>
                     </div>
                     <div class="panel-body">
                         <div class="alert-list" id="alertList">
@@ -912,19 +1018,14 @@ body {
         function connect() {
             ws = new WebSocket('ws://' + location.host + ':8765/ws');
             ws.onopen = () => {
-                document.getElementById('connDot').className = 'status-dot online';
-                document.getElementById('connStatus').textContent = '已连接';
+                document.getElementById('connDot')?.classList.add('online');
             };
             ws.onmessage = (e) => {
                 const m = JSON.parse(e.data);
                 if (m.type === 'inspection') addInspection(m.data);
                 else if (m.type === 'robot_status') updateRobot(m.data);
             };
-            ws.onclose = () => {
-                document.getElementById('connDot').className = 'status-dot';
-                document.getElementById('connStatus').textContent = '未连接';
-                setTimeout(connect, 3000);
-            };
+            ws.onclose = () => setTimeout(connect, 3000);
         }
         
         function addInspection(d) {
@@ -958,11 +1059,11 @@ body {
         }
         
         async function sendCmd(c) {
-            try { await fetch('/api/control/' + c, {method: 'POST'}); } catch(e) { console.error(e); }
+            try { await fetch('/api/control/' + c, {method: 'POST'}); } catch(e) {}
         }
         
         async function sendDemo() {
-            try { await fetch('/api/demo', {method: 'POST'}); document.getElementById('alertCount').textContent = Math.floor(Math.random()*5)+1; } catch(e) {}
+            try { await fetch('/api/demo', {method: 'POST'}); document.getElementById('alertBadge').textContent = Math.floor(Math.random()*5)+1; } catch(e) {}
         }
         
         async function sendDemoStatus() {
@@ -973,11 +1074,20 @@ body {
             fetch('/api/robot').then(r => r.json()).then(d => updateRobot(d));
         }
         
-        setInterval(() => document.getElementById('currentTime').textContent = new Date().toLocaleTimeString(), 1000);
-        setInterval(() => fetch('/api/status').then(r => r.json()).then(d => {
-            document.getElementById('clientCount').textContent = d.clients;
-            document.getElementById('alertCount').textContent = d.alerts;
-        }), 2000);
+        function showNotifications() {
+            alert('通知中心功能开发中...');
+        }
+        
+        function showUserMenu() {
+            alert('用户菜单功能开发中...');
+        }
+        
+        // 更新时间
+        setInterval(() => {
+            const now = new Date();
+            const timeStr = now.toISOString().slice(0, 19).replace('T', ' ');
+            document.getElementById('currentTime').textContent = timeStr;
+        }, 1000);
         
         connect();
     </script>
@@ -986,7 +1096,6 @@ body {
 
 
 async def main():
-    # 替换图片占位符
     global DASHBOARD_HTML
     if ROBOT_IMAGE_URI:
         DASHBOARD_HTML = DASHBOARD_HTML.replace("__ROBOT_IMAGE__", ROBOT_IMAGE_URI)
