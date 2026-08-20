@@ -4,7 +4,7 @@
 绝影Lite3 监测平台 - 设计稿还原版
 """
 
-import asyncio, json, time, logging, struct, socket
+import asyncio, json, time, logging, struct, socket, base64
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -20,6 +20,14 @@ WS_PORT, HTTP_PORT = 8765, 8000
 MOTION_HOST, MOTION_PORT = "192.168.1.103", 43893
 CMD_STAND_UP, CMD_STAND_DOWN = 0x21010202, 0x21010203
 CMD_EMERGENCY_STOP, CMD_VELOCITY = 0x21020C0E, 0x0103
+
+# 读取机器狗图片
+ROBOT_IMAGE_URI = ""
+try:
+    with open(Path(__file__).parent.parent / "docs/assets/03-绝影Lite3机器狗.jpg", "rb") as f:
+        ROBOT_IMAGE_URI = f"data:image/jpeg;base64,{base64.b64encode(f.read()).decode()}"
+except:
+    ROBOT_IMAGE_URI = ""
 
 connections: List[WebSocket] = []
 inspections: List[Dict] = []
@@ -307,11 +315,6 @@ body {
     max-width: 90%;
     max-height: 90%;
     object-fit: contain;
-}
-
-.robot-image .placeholder {
-    font-size: 64px;
-    opacity: 0.3;
 }
 
 .robot-details {
@@ -709,7 +712,7 @@ body {
             </div>
             <div class="robot-info-body">
                 <div class="robot-image">
-                    <div class="placeholder">🐕</div>
+                    <img src="__ROBOT_IMAGE__" alt="绝影Lite3机器狗" onerror="this.style.display='none';this.parentElement.innerHTML='🐕'">
                 </div>
                 <div class="robot-details">
                     <div class="detail-item">
@@ -983,6 +986,13 @@ body {
 
 
 async def main():
+    # 替换图片占位符
+    global DASHBOARD_HTML
+    if ROBOT_IMAGE_URI:
+        DASHBOARD_HTML = DASHBOARD_HTML.replace("__ROBOT_IMAGE__", ROBOT_IMAGE_URI)
+    else:
+        DASHBOARD_HTML = DASHBOARD_HTML.replace('__ROBOT_IMAGE__', 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiByPSI0MCIgZmlsbD0iI2RkZCIvPjx0ZXh0IHg9IjUwIiB5PSI2MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSI0MCI+8J+OwDwvdGV4dD48L3N2Zz4=')
+    
     config = uvicorn.Config(app, host="0.0.0.0", port=HTTP_PORT, log_level="info")
     server = uvicorn.Server(config)
     logger.info(f"监测平台启动: http://0.0.0.0:{HTTP_PORT}")
