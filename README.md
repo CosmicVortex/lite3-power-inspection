@@ -73,11 +73,20 @@
 
 #### 依赖安装说明
 
-**感知主机**仅需安装：
+**感知主机**需安装以下依赖（约5MB）：
 ```bash
-# 核心依赖（约2.5MB）
-pip install loguru websockets
+# 核心依赖
+pip install loguru numpy opencv-python requests pyyaml websockets
 ```
+
+> **注意**：感知主机无网络连接，需提前下载wheel包离线安装：
+> ```bash
+> # 在有网机器上下载
+> pip download loguru numpy opencv-python requests pyyaml websockets -d ./offline-deploy
+> 
+> # 传输到感知主机后离线安装
+> pip install --no-index --find-links=./offline-deploy loguru numpy opencv-python requests pyyaml websockets
+> ```
 
 **监测平台（笔记本）**需安装：
 ```bash
@@ -98,34 +107,53 @@ pip install fastapi uvicorn websockets pydantic loguru
 ssh ysc@192.168.1.103
 # 密码: '（英文单引号）
 
-# 2. 解压部署包并安装依赖
+# 2. 解压部署包
 cd ~ && mkdir -p lite3-power-inspection && cd lite3-power-inspection
 unzip -q ~/lite3-power-inspection.zip
-python3 -m venv venv && source venv/bin/activate
-pip install -q loguru websockets
 
-# 3. 启动巡检程序
+# 3. 安装依赖（无网络时使用离线包）
+./scripts/deploy_oneclick.sh --offline-dir ./offline-deploy
+# 或手动安装：
+pip install loguru numpy opencv-python requests pyyaml websockets
+
+# 4. 启动巡检程序
 python3 scripts/run_demo.py --mode simulation
 ```
 
 #### 监测平台部署（笔记本）
 
+> **方式一：使用一键启动脚本（推荐）**
+
 ```bash
-# 1. 解压便携包
-cd /tmp && unzip -q monitor-platform-portable.zip
-cd monitor-platform
+# Linux/macOS - 直接运行启动脚本
+./scripts/start_monitor.sh
+
+# Windows - 双击运行或在CMD中执行
+start_monitor.bat
+```
+
+> **方式二：手动部署**
+
+```bash
+# 1. 进入monitor_platform目录
+cd monitor_platform
 
 # 2. 创建虚拟环境并安装依赖
-python3 -m venv venv && source venv/bin/activate
-pip install fastapi uvicorn websockets pydantic
+python3 -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+pip install -r requirements.txt
 
-# 3. 启动监测平台
-./scripts/start_monitor.sh  # Linux/macOS
-# 或
-call scripts\start_monitor.bat  # Windows
+# 3. 启动服务
+python server.py
 ```
 
 **访问地址**: http://localhost:8000
+
+| 服务 | 地址 |
+|------|------|
+| Web界面 | http://localhost:8000 |
+| API文档 | http://localhost:8000/docs |
+| WebSocket | ws://localhost:8765/ws |
 
 ### 2.3 分步部署
 
