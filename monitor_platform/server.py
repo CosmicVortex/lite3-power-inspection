@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-绝影Lite3 监测平台 - Ghost CMS风格UI升级版
-参考Ghost CMS设计理念：极简、专业、高质量视觉、大量留白
-适应电力巡检主题内容
+绝影Lite3 监测平台 - Ghost CMS风格界面
+基于Ghost Admin设计系统：左侧导航栏 + 顶部Header + 卡片布局
 """
 
 import asyncio, json, time, logging, struct, socket, base64
@@ -31,24 +30,6 @@ CMD_HOME = 0x21010C05
 CMD_MOVE_MODE = 0x21010D06
 CMD_STAND_MODE = 0x21010D05
 
-# ========== 按键映射 ==========
-KEY_FORWARD = ['w', 'arrowup']
-KEY_BACKWARD = ['s', 'arrowdown']
-KEY_LEFT = ['a', 'arrowleft']
-KEY_RIGHT = ['d', 'arrowright']
-KEY_TURN_LEFT = ['q', 'shift']
-KEY_TURN_RIGHT = ['e', 'ctrl']
-KEY_STAND_UP = [' ']
-KEY_EMERGENCY = ['escape']
-
-# 读取机器狗图片
-ROBOT_IMAGE_URI = ""
-try:
-    with open(Path(__file__).parent.parent / "docs/assets/03-绝影Lite3机器狗.jpg", "rb") as f:
-        ROBOT_IMAGE_URI = f"data:image/jpeg;base64,{base64.b64encode(f.read()).decode()}"
-except:
-    ROBOT_IMAGE_URI = ""
-
 connections: List[WebSocket] = []
 inspections: List[Dict] = []
 alerts: List[Dict] = []
@@ -62,134 +43,243 @@ motion_sock = None
 key_state = {"forward": False, "backward": False, "left": False, "right": False,
              "turn_left": False, "turn_right": False, "stand": False}
 
-# ========== Ghost CMS风格UI ==========
-GHOST_HTML = """<!DOCTYPE html>
+# ========== Ghost CMS风格HTML ==========
+GHOST_ADMIN_HTML = """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>绝影Lite3 · 电力巡检监控中心</title>
     <style>
-        /* ========== Ghost CMS设计系统 ========== */
+        /* ========== Ghost Design System ========== */
         :root {
             /* Ghost品牌色 */
             --ghost-black: #15171A;
             --ghost-dark: #222429;
-            --ghost-gray: #3A3E47;
-            --ghost-mid: #515761;
+            --ghost-sidebar: #1A1C23;
+            --ghost-mid: #3A3E47;
             --ghost-light: #6B727A;
-            --ghost-pale: #Brodie: #D4D7DC;
+            --ghost-pale: #D4D7DC;
             --ghost-palest: #F1F3F5;
             --ghost-white: #FFFFFF;
             
-            /* 主题色（电力巡检） */
+            /* 主题色 */
             --primary: #FF6B35;
-            --primary-light: #FF8F5A;
+            --primary-hover: #E55A28;
             --success: #00C853;
             --warning: #FFB300;
             --danger: #FF3D00;
-            --info: #2196F3;
             
-            /* 间距系统 */
+            /* 间距 */
             --space-xs: 4px;
             --space-sm: 8px;
             --space-md: 16px;
             --space-lg: 24px;
             --space-xl: 32px;
             --space-2xl: 48px;
-            --space-3xl: 64px;
             
             /* 圆角 */
             --radius-sm: 4px;
             --radius-md: 8px;
             --radius-lg: 12px;
-            --radius-xl: 16px;
-            --radius-full: 9999px;
             
             /* 阴影 */
-            --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
-            --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1);
-            --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1);
-            --shadow-xl: 0 20px 25px -5px rgba(0,0,0,0.1);
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.12);
+            --shadow-md: 0 4px 6px rgba(0,0,0,0.1);
         }
         
-        /* ========== 基础重置 ========== */
-        *, *::before, *::after {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        html {
-            font-size: 16px;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background-color: var(--ghost-palest);
-            color: var(--ghost-gray);
-            line-height: 1.6;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: var(--ghost-palest);
+            color: var(--ghost-dark);
             min-height: 100vh;
+            display: flex;
         }
         
-        /* ========== 顶部导航（Ghost风格：简洁、白色、sticky） ========== */
-        .header {
-            background: var(--ghost-white);
-            border-bottom: 1px solid var(--ghost-pale);
-            padding: 0 var(--space-xl);
-            height: 60px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            position: sticky;
+        /* ========== 左侧导航栏（Ghost风格）========== */
+        .sidebar {
+            width: 240px;
+            background: var(--ghost-sidebar);
+            min-height: 100vh;
+            position: fixed;
+            left: 0;
             top: 0;
             z-index: 100;
+            display: flex;
+            flex-direction: column;
         }
         
-        .logo {
+        .sidebar-logo {
+            padding: var(--space-lg) var(--space-xl);
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+        
+        .sidebar-logo a {
             display: flex;
             align-items: center;
             gap: var(--space-md);
             text-decoration: none;
-            color: var(--ghost-black);
+            color: var(--ghost-white);
         }
         
-        .logo-icon {
-            width: 32px;
-            height: 32px;
+        .sidebar-logo-icon {
+            width: 36px;
+            height: 36px;
             background: var(--primary);
             border-radius: var(--radius-md);
             display: flex;
             align-items: center;
             justify-content: center;
-            color: white;
-            font-size: 18px;
+            font-size: 20px;
         }
         
-        .logo-text {
-            font-size: 18px;
+        .sidebar-logo-text {
+            font-size: 16px;
             font-weight: 600;
             letter-spacing: -0.3px;
         }
         
-        .logo-subtitle {
-            font-size: 12px;
-            color: var(--ghost-light);
-            font-weight: 400;
-            margin-left: var(--space-sm);
-            padding-left: var(--space-sm);
-            border-left: 1px solid var(--ghost-pale);
+        .sidebar-nav {
+            flex: 1;
+            padding: var(--space-md) 0;
+            overflow-y: auto;
         }
         
-        .header-right {
+        .nav-section {
+            margin-bottom: var(--space-lg);
+        }
+        
+        .nav-section-title {
+            padding: var(--space-sm) var(--space-xl);
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: var(--ghost-light);
+        }
+        
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: var(--space-md);
+            padding: var(--space-md) var(--space-xl);
+            color: rgba(255,255,255,0.7);
+            text-decoration: none;
+            font-size: 14px;
+            transition: all 0.15s ease;
+            cursor: pointer;
+        }
+        
+        .nav-item:hover {
+            background: rgba(255,255,255,0.06);
+            color: var(--ghost-white);
+        }
+        
+        .nav-item.active {
+            background: rgba(255,255,255,0.1);
+            color: var(--ghost-white);
+            border-left: 3px solid var(--primary);
+            padding-left: calc(var(--space-xl) - 3px);
+        }
+        
+        .nav-item-icon {
+            width: 20px;
+            text-align: center;
+            font-size: 16px;
+        }
+        
+        .nav-item-badge {
+            margin-left: auto;
+            background: var(--primary);
+            color: white;
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-weight: 600;
+        }
+        
+        /* ========== 主内容区 ========== */
+        .main-wrapper {
+            flex: 1;
+            margin-left: 240px;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        
+        /* ========== 顶部Header ========== */
+        .header {
+            height: 60px;
+            background: var(--ghost-white);
+            border-bottom: 1px solid var(--ghost-pale);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 var(--space-xl);
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+        
+        .header-left {
             display: flex;
             align-items: center;
             gap: var(--space-lg);
         }
         
-        .status-badge {
+        .breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: var(--space-sm);
+            font-size: 14px;
+            color: var(--ghost-light);
+        }
+        
+        .breadcrumb-separator {
+            color: var(--ghost-pale);
+        }
+        
+        .breadcrumb-current {
+            color: var(--ghost-dark);
+            font-weight: 500;
+        }
+        
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: var(--space-md);
+        }
+        
+        .header-btn {
+            padding: var(--space-sm) var(--space-md);
+            border: 1px solid var(--ghost-pale);
+            border-radius: var(--radius-md);
+            background: var(--ghost-white);
+            color: var(--ghost-dark);
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        
+        .header-btn:hover {
+            border-color: var(--ghost-mid);
+            background: var(--ghost-palest);
+        }
+        
+        .header-btn.primary {
+            background: var(--primary);
+            border-color: var(--primary);
+            color: white;
+        }
+        
+        .header-btn.primary:hover {
+            background: var(--primary-hover);
+            border-color: var(--primary-hover);
+        }
+        
+        .connection-status {
             display: flex;
             align-items: center;
             gap: var(--space-sm);
@@ -198,7 +288,6 @@ GHOST_HTML = """<!DOCTYPE html>
             border-radius: var(--radius-full);
             font-size: 13px;
             color: var(--success);
-            font-weight: 500;
         }
         
         .status-dot {
@@ -210,89 +299,47 @@ GHOST_HTML = """<!DOCTYPE html>
         }
         
         @keyframes pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.5; transform: scale(1.2); }
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
         }
         
-        .time-display {
-            font-size: 13px;
-            color: var(--ghost-light);
-            font-variant-numeric: tabular-nums;
+        /* ========== 内容区域 ========== */
+        .content {
+            flex: 1;
+            padding: var(--space-xl);
+            overflow-y: auto;
         }
         
-        /* ========== 主内容区（大量留白） ========== */
-        .main {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: var(--space-2xl) var(--space-xl);
+        .page-header {
+            margin-bottom: var(--space-xl);
         }
         
-        /* ========== Ghost风格Hero区域 ========== */
-        .hero {
-            background: var(--ghost-white);
-            border-radius: var(--radius-xl);
-            padding: var(--space-3xl);
-            margin-bottom: var(--space-2xl);
-            box-shadow: var(--shadow-sm);
-            border: 1px solid var(--ghost-pale);
-        }
-        
-        .hero-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: var(--space-2xl);
-        }
-        
-        .hero-title {
-            font-size: 42px;
+        .page-title {
+            font-size: 24px;
             font-weight: 700;
             color: var(--ghost-black);
-            letter-spacing: -1.5px;
-            line-height: 1.1;
+            letter-spacing: -0.5px;
             margin-bottom: var(--space-sm);
         }
         
-        .hero-subtitle {
-            font-size: 18px;
+        .page-subtitle {
+            font-size: 14px;
             color: var(--ghost-light);
-            font-weight: 400;
         }
         
-        .hero-meta {
-            text-align: right;
-        }
-        
-        .hero-meta-value {
-            font-size: 48px;
-            font-weight: 700;
-            color: var(--primary);
-            letter-spacing: -2px;
-            line-height: 1;
-        }
-        
-        .hero-meta-label {
-            font-size: 13px;
-            color: var(--ghost-light);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-top: var(--space-sm);
-        }
-        
-        /* ========== 卡片网格（Ghost风格：大间距、简洁） ========== */
+        /* ========== 卡片网格 ========== */
         .cards-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: var(--space-xl);
-            margin-bottom: var(--space-2xl);
+            gap: var(--space-lg);
+            margin-bottom: var(--space-xl);
         }
         
         .card {
             background: var(--ghost-white);
-            border-radius: var(--radius-xl);
-            padding: var(--space-xl);
-            box-shadow: var(--shadow-sm);
+            border-radius: var(--radius-lg);
             border: 1px solid var(--ghost-pale);
+            overflow: hidden;
             transition: all 0.2s ease;
         }
         
@@ -302,39 +349,29 @@ GHOST_HTML = """<!DOCTYPE html>
         }
         
         .card-header {
+            padding: var(--space-lg);
+            border-bottom: 1px solid var(--ghost-palest);
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: var(--space-lg);
-            padding-bottom: var(--space-md);
-            border-bottom: 1px solid var(--ghost-palest);
         }
         
         .card-title {
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 600;
-            color: var(--ghost-black);
             text-transform: uppercase;
             letter-spacing: 0.5px;
-        }
-        
-        .card-badge {
-            font-size: 11px;
-            padding: 2px 8px;
-            background: var(--ghost-palest);
             color: var(--ghost-light);
-            border-radius: var(--radius-full);
-            font-weight: 500;
         }
         
         .card-icon {
-            width: 36px;
-            height: 36px;
+            width: 32px;
+            height: 32px;
             border-radius: var(--radius-md);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 18px;
+            font-size: 16px;
         }
         
         .card-icon.orange { background: #FFF3E0; }
@@ -342,7 +379,11 @@ GHOST_HTML = """<!DOCTYPE html>
         .card-icon.blue { background: #E3F2FD; }
         .card-icon.red { background: #FFEbee; }
         
-        /* ========== 电池环形（优化版） ========== */
+        .card-body {
+            padding: var(--space-lg);
+        }
+        
+        /* ========== 电池环形 ========== */
         .battery-container {
             display: flex;
             flex-direction: column;
@@ -352,27 +393,26 @@ GHOST_HTML = """<!DOCTYPE html>
         
         .battery-ring {
             position: relative;
-            width: 140px;
-            height: 140px;
+            width: 120px;
+            height: 120px;
         }
         
         .battery-ring svg {
             transform: rotate(-90deg);
-            filter: drop-shadow(0 2px 8px rgba(0,0,0,0.1));
         }
         
         .battery-ring-bg {
             fill: none;
             stroke: var(--ghost-palest);
-            stroke-width: 10;
+            stroke-width: 8;
         }
         
         .battery-ring-fill {
             fill: none;
             stroke: var(--success);
-            stroke-width: 10;
+            stroke-width: 8;
             stroke-linecap: round;
-            transition: stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: stroke-dashoffset 0.8s ease;
         }
         
         .battery-center {
@@ -384,34 +424,19 @@ GHOST_HTML = """<!DOCTYPE html>
         }
         
         .battery-percent {
-            font-size: 36px;
+            font-size: 28px;
             font-weight: 700;
             color: var(--ghost-black);
-            letter-spacing: -1px;
             line-height: 1;
         }
         
         .battery-label {
-            font-size: 12px;
+            font-size: 11px;
             color: var(--ghost-light);
             margin-top: var(--space-xs);
         }
         
-        .battery-info {
-            text-align: center;
-        }
-        
-        .battery-endurance {
-            font-size: 14px;
-            color: var(--ghost-gray);
-        }
-        
-        .battery-endurance strong {
-            color: var(--ghost-black);
-            font-weight: 600;
-        }
-        
-        /* ========== 数据展示（Ghost风格：简洁大字体） ========== */
+        /* ========== 数据行 ========== */
         .data-row {
             display: flex;
             justify-content: space-between;
@@ -425,76 +450,41 @@ GHOST_HTML = """<!DOCTYPE html>
         }
         
         .data-label {
-            font-size: 14px;
-            color: var(--ghost-light);
-        }
-        
-        .data-value {
-            font-size: 20px;
-            font-weight: 600;
-            color: var(--ghost-black);
-            font-variant-numeric: tabular-nums;
-        }
-        
-        .data-value.warning {
-            color: var(--warning);
-        }
-        
-        .data-value.danger {
-            color: var(--danger);
-        }
-        
-        /* ========== 控制面板（Ghost风格：简洁清晰） ========== */
-        .control-section {
-            background: var(--ghost-white);
-            border-radius: var(--radius-xl);
-            padding: var(--space-xl);
-            box-shadow: var(--shadow-sm);
-            border: 1px solid var(--ghost-pale);
-            margin-bottom: var(--space-xl);
-        }
-        
-        .control-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: var(--space-lg);
-        }
-        
-        .control-title {
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--ghost-black);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        
-        .control-hint {
             font-size: 13px;
             color: var(--ghost-light);
         }
         
+        .data-value {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--ghost-black);
+        }
+        
+        .data-value.warning { color: var(--warning); }
+        .data-value.danger { color: var(--danger); }
+        
+        /* ========== D-Pad控制器 ========== */
         .dpad {
             display: grid;
-            grid-template-columns: repeat(3, 64px);
-            grid-template-rows: repeat(3, 64px);
+            grid-template-columns: repeat(3, 56px);
+            grid-template-rows: repeat(3, 56px);
             gap: var(--space-sm);
-            margin: var(--space-xl) auto;
+            margin: var(--space-lg) auto;
             width: fit-content;
         }
         
         .dpad-btn {
-            width: 64px;
-            height: 64px;
+            width: 56px;
+            height: 56px;
             border: 1px solid var(--ghost-pale);
-            border-radius: var(--radius-lg);
+            border-radius: var(--radius-md);
             background: var(--ghost-white);
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 24px;
-            color: var(--ghost-gray);
+            font-size: 20px;
+            color: var(--ghost-mid);
             transition: all 0.15s ease;
         }
         
@@ -502,7 +492,6 @@ GHOST_HTML = """<!DOCTYPE html>
             background: var(--primary);
             border-color: var(--primary);
             color: white;
-            transform: scale(1.05);
         }
         
         .dpad-btn:active {
@@ -513,33 +502,29 @@ GHOST_HTML = """<!DOCTYPE html>
             background: transparent;
             border: none;
             cursor: default;
-            pointer-events: none;
         }
         
         .action-buttons {
             display: flex;
             gap: var(--space-md);
             justify-content: center;
-            margin-top: var(--space-xl);
-            padding-top: var(--space-lg);
-            border-top: 1px solid var(--ghost-palest);
+            margin-top: var(--space-lg);
         }
         
         .action-btn {
-            padding: var(--space-md) var(--space-xl);
+            padding: var(--space-sm) var(--space-lg);
             border: 1px solid var(--ghost-pale);
             border-radius: var(--radius-md);
-            font-size: 14px;
+            background: var(--ghost-white);
+            color: var(--ghost-dark);
+            font-size: 13px;
             font-weight: 500;
             cursor: pointer;
             transition: all 0.15s ease;
-            background: var(--ghost-white);
-            color: var(--ghost-gray);
         }
         
         .action-btn:hover {
             border-color: var(--ghost-mid);
-            color: var(--ghost-black);
         }
         
         .action-btn.primary {
@@ -548,36 +533,20 @@ GHOST_HTML = """<!DOCTYPE html>
             color: white;
         }
         
-        .action-btn.primary:hover {
-            background: var(--primary-light);
-            border-color: var(--primary-light);
-        }
-        
         .action-btn.danger {
             background: var(--danger);
             border-color: var(--danger);
             color: white;
         }
         
-        .action-btn.danger:hover {
-            background: #E53935;
-            border-color: #E53935;
-        }
-        
-        /* ========== 告警列表（Ghost风格：时间线设计） ========== */
+        /* ========== 告警列表 ========== */
         .alert-list {
-            max-height: 320px;
+            max-height: 280px;
             overflow-y: auto;
-            padding-right: var(--space-sm);
         }
         
         .alert-list::-webkit-scrollbar {
             width: 4px;
-        }
-        
-        .alert-list::-webkit-scrollbar-track {
-            background: var(--ghost-palest);
-            border-radius: 2px;
         }
         
         .alert-list::-webkit-scrollbar-thumb {
@@ -592,70 +561,51 @@ GHOST_HTML = """<!DOCTYPE html>
             border-radius: var(--radius-md);
             margin-bottom: var(--space-sm);
             background: var(--ghost-palest);
-            transition: all 0.2s ease;
+            transition: all 0.15s ease;
         }
         
         .alert-item:hover {
             background: var(--ghost-pale);
         }
         
-        .alert-item.warning {
-            background: #FFF8E1;
-        }
+        .alert-item.warning { background: #FFF8E1; }
+        .alert-item.danger { background: #FFEBEE; }
         
-        .alert-item.danger {
-            background: #FFEBEE;
-        }
-        
-        .alert-indicator {
-            width: 32px;
-            height: 32px;
-            border-radius: var(--radius-full);
+        .alert-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 14px;
+            font-size: 12px;
             flex-shrink: 0;
         }
         
-        .alert-indicator.warning {
-            background: var(--warning);
-            color: white;
-        }
-        
-        .alert-indicator.danger {
-            background: var(--danger);
-            color: white;
-        }
+        .alert-icon.warning { background: var(--warning); color: white; }
+        .alert-icon.danger { background: var(--danger); color: white; }
         
         .alert-content {
             flex: 1;
         }
         
         .alert-message {
-            font-size: 14px;
-            color: var(--ghost-black);
+            font-size: 13px;
+            color: var(--ghost-dark);
             font-weight: 500;
         }
         
         .alert-time {
-            font-size: 12px;
+            font-size: 11px;
             color: var(--ghost-light);
-            margin-top: var(--space-xs);
+            margin-top: 2px;
         }
         
-        .alert-empty {
-            text-align: center;
-            padding: var(--space-2xl);
-            color: var(--ghost-light);
-            font-size: 14px;
-        }
-        
-        /* ========== 进度条（Ghost风格） ========== */
+        /* ========== 进度条 ========== */
         .progress-bar {
             height: 4px;
             background: var(--ghost-palest);
-            border-radius: var(--radius-full);
+            border-radius: 2px;
             overflow: hidden;
             margin-top: var(--space-md);
         }
@@ -663,45 +613,53 @@ GHOST_HTML = """<!DOCTYPE html>
         .progress-fill {
             height: 100%;
             background: var(--primary);
-            border-radius: var(--radius-full);
+            border-radius: 2px;
             transition: width 0.5s ease;
         }
         
-        /* ========== Footer ========== */
-        .footer {
+        /* ========== 空状态 ========== */
+        .empty-state {
             text-align: center;
             padding: var(--space-2xl);
             color: var(--ghost-light);
             font-size: 13px;
-            border-top: 1px solid var(--ghost-pale);
-            margin-top: var(--space-2xl);
         }
         
         /* ========== 响应式 ========== */
+        @media (max-width: 1024px) {
+            .sidebar {
+                width: 60px;
+            }
+            
+            .sidebar-logo-text,
+            .nav-item-text,
+            .nav-section-title,
+            .nav-item-badge {
+                display: none;
+            }
+            
+            .nav-item {
+                justify-content: center;
+                padding: var(--space-md);
+            }
+            
+            .nav-item.active {
+                padding-left: var(--space-md);
+                border-left-width: 3px;
+            }
+            
+            .main-wrapper {
+                margin-left: 60px;
+            }
+        }
+        
         @media (max-width: 768px) {
-            .header {
-                padding: 0 var(--space-md);
+            .sidebar {
+                display: none;
             }
             
-            .main {
-                padding: var(--space-lg) var(--space-md);
-            }
-            
-            .hero {
-                padding: var(--space-xl);
-            }
-            
-            .hero-header {
-                flex-direction: column;
-                gap: var(--space-lg);
-            }
-            
-            .hero-meta {
-                text-align: left;
-            }
-            
-            .hero-title {
-                font-size: 28px;
+            .main-wrapper {
+                margin-left: 0;
             }
             
             .cards-grid {
@@ -711,160 +669,218 @@ GHOST_HTML = """<!DOCTYPE html>
     </style>
 </head>
 <body>
-    <!-- 顶部导航 -->
-    <header class="header">
-        <a href="/" class="logo">
-            <div class="logo-icon">🤖</div>
-            <span class="logo-text">绝影Lite3</span>
-            <span class="logo-subtitle">电力巡检监控中心</span>
-        </a>
-        <div class="header-right">
-            <div class="status-badge">
-                <span class="status-dot"></span>
-                <span id="connectionStatus">已连接</span>
-            </div>
-            <span class="time-display" id="currentTime"></span>
+    <!-- 左侧导航栏 -->
+    <aside class="sidebar">
+        <div class="sidebar-logo">
+            <a href="/">
+                <div class="sidebar-logo-icon">🤖</div>
+                <span class="sidebar-logo-text">绝影Lite3</span>
+            </a>
         </div>
-    </header>
+        
+        <nav class="sidebar-nav">
+            <div class="nav-section">
+                <div class="nav-section-title">监控中心</div>
+                <a class="nav-item active" href="#">
+                    <span class="nav-item-icon">📊</span>
+                    <span class="nav-item-text">实时监控</span>
+                </a>
+                <a class="nav-item" href="#">
+                    <span class="nav-item-icon">🌡️</span>
+                    <span class="nav-item-text">温度监测</span>
+                </a>
+                <a class="nav-item" href="#">
+                    <span class="nav-item-icon">🔍</span>
+                    <span class="nav-item-text">裂缝检测</span>
+                </a>
+            </div>
+            
+            <div class="nav-section">
+                <div class="nav-section-title">控制</div>
+                <a class="nav-item" href="#">
+                    <span class="nav-item-icon">🎮</span>
+                    <span class="nav-item-text">设备控制</span>
+                </a>
+                <a class="nav-item" href="#">
+                    <span class="nav-item-icon">📹</span>
+                    <span class="nav-item-text">视频流</span>
+                </a>
+            </div>
+            
+            <div class="nav-section">
+                <div class="nav-section-title">历史</div>
+                <a class="nav-item" href="#">
+                    <span class="nav-item-icon">📈</span>
+                    <span class="nav-item-text">巡检记录</span>
+                </a>
+                <a class="nav-item" href="#">
+                    <span class="nav-item-icon">⚠️</span>
+                    <span class="nav-item-text">告警历史</span>
+                    <span class="nav-item-badge" id="alertBadge">0</span>
+                </a>
+            </div>
+        </nav>
+    </aside>
     
-    <!-- 主内容 -->
-    <main class="main">
-        <!-- Hero区域（Ghost风格：大标题+关键数据） -->
-        <section class="hero">
-            <div class="hero-header">
-                <div>
-                    <h1 class="hero-title">实时巡检监控</h1>
-                    <p class="hero-subtitle">绝影Lite3专业版 · 智能电力巡检系统</p>
-                </div>
-                <div class="hero-meta">
-                    <div class="hero-meta-value" id="clientCount">0</div>
-                    <div class="hero-meta-label">在线设备</div>
+    <!-- 主内容区 -->
+    <div class="main-wrapper">
+        <!-- 顶部Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="breadcrumb">
+                    <span>监控中心</span>
+                    <span class="breadcrumb-separator">/</span>
+                    <span class="breadcrumb-current">实时监控</span>
                 </div>
             </div>
             
-            <!-- 进度条：巡检进度 -->
-            <div style="margin-top: var(--space-xl);">
+            <div class="header-right">
+                <div class="connection-status">
+                    <span class="status-dot"></span>
+                    <span id="connectionStatus">已连接</span>
+                </div>
+                <span style="font-size: 13px; color: var(--ghost-light);" id="currentTime"></span>
+                <button class="header-btn" onclick="fetchDemo()">演示模式</button>
+                <button class="header-btn primary" onclick="sendCmd('stand_up')">起立/趴下</button>
+            </div>
+        </header>
+        
+        <!-- 内容区域 -->
+        <main class="content">
+            <div class="page-header">
+                <h1 class="page-title">实时监控</h1>
+                <p class="page-subtitle">绝影Lite3专业版 · 智能电力巡检系统</p>
+            </div>
+            
+            <!-- 巡检进度 -->
+            <div style="background: var(--ghost-white); border-radius: var(--radius-lg); border: 1px solid var(--ghost-pale); padding: var(--space-lg); margin-bottom: var(--space-xl);">
                 <div style="display: flex; justify-content: space-between; margin-bottom: var(--space-sm);">
                     <span style="font-size: 13px; color: var(--ghost-light);">巡检进度</span>
-                    <span style="font-size: 13px; color: var(--ghost-gray); font-weight: 500;" id="progressText">0 / 5</span>
+                    <span style="font-size: 13px; color: var(--ghost-dark); font-weight: 500;" id="progressText">0 / 5</span>
                 </div>
                 <div class="progress-bar">
                     <div class="progress-fill" id="progressFill" style="width: 0%;"></div>
                 </div>
             </div>
-        </section>
-        
-        <!-- 数据卡片 -->
-        <section class="cards-grid">
-            <!-- 电池状态 -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">电池状态</span>
-                    <div class="card-icon orange">🔋</div>
-                </div>
-                <div class="battery-container">
-                    <div class="battery-ring">
-                        <svg width="140" height="140" viewBox="0 0 140 140">
-                            <circle class="battery-ring-bg" cx="70" cy="70" r="60"/>
-                            <circle class="battery-ring-fill" id="batteryRing" cx="70" cy="70" r="60"
-                                    stroke-dasharray="377" stroke-dashoffset="113"/>
-                        </svg>
-                        <div class="battery-center">
-                            <div class="battery-percent" id="batteryPercent">68%</div>
-                            <div class="battery-label">电量</div>
+            
+            <!-- 数据卡片 -->
+            <div class="cards-grid">
+                <!-- 电池状态 -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">电池状态</span>
+                        <div class="card-icon orange">🔋</div>
+                    </div>
+                    <div class="card-body">
+                        <div class="battery-container">
+                            <div class="battery-ring">
+                                <svg width="120" height="120" viewBox="0 0 120 120">
+                                    <circle class="battery-ring-bg" cx="60" cy="60" r="52"/>
+                                    <circle class="battery-ring-fill" id="batteryRing" cx="60" cy="60" r="52"
+                                            stroke-dasharray="326.7" stroke-dashoffset="100"/>
+                                </svg>
+                                <div class="battery-center">
+                                    <div class="battery-percent" id="batteryPercent">68%</div>
+                                    <div class="battery-label">电量</div>
+                                </div>
+                            </div>
+                            <div style="text-align: center;">
+                                <span style="font-size: 13px; color: var(--ghost-light);">预估续航</span>
+                                <strong style="font-size: 18px; color: var(--ghost-black); margin-left: var(--space-sm);" id="enduranceValue">1.8</strong>
+                                <span style="font-size: 13px; color: var(--ghost-light);">小时</span>
+                            </div>
                         </div>
                     </div>
-                    <div class="battery-info">
-                        <div class="battery-endurance">预估续航 <strong id="enduranceValue">1.8</strong> 小时</div>
+                </div>
+                
+                <!-- 系统状态 -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">系统状态</span>
+                        <div class="card-icon green">📊</div>
+                    </div>
+                    <div class="card-body" style="padding: 0;">
+                        <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
+                            <span class="data-label">CPU 温度</span>
+                            <span class="data-value" id="cpuTempValue">35.0°C</span>
+                        </div>
+                        <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
+                            <span class="data-label">GPU 负载</span>
+                            <span class="data-value" id="gpuLoadValue">0%</span>
+                        </div>
+                        <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
+                            <span class="data-label">内存使用</span>
+                            <span class="data-value" id="memoryUsageValue">45%</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 位置信息 -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">当前位置</span>
+                        <div class="card-icon blue">📍</div>
+                    </div>
+                    <div class="card-body" style="padding: 0;">
+                        <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
+                            <span class="data-label">坐标</span>
+                            <span class="data-value" id="positionValue">(0.0, 0.0)</span>
+                        </div>
+                        <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
+                            <span class="data-label">当前航点</span>
+                            <span class="data-value" id="waypointValue">WP001</span>
+                        </div>
+                        <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
+                            <span class="data-label">运行状态</span>
+                            <span class="data-value" id="statusValue">空闲</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 告警信息 -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">实时告警</span>
+                        <span style="font-size: 12px; color: var(--ghost-light);" id="alertCount">0</span>
+                    </div>
+                    <div class="card-body" style="padding: var(--space-md);">
+                        <div class="alert-list" id="alertList">
+                            <div class="empty-state">暂无告警信息</div>
+                        </div>
                     </div>
                 </div>
             </div>
             
-            <!-- 系统状态 -->
+            <!-- 控制面板 -->
             <div class="card">
                 <div class="card-header">
-                    <span class="card-title">系统状态</span>
-                    <div class="card-icon green">📊</div>
+                    <span class="card-title">运动控制</span>
+                    <span style="font-size: 12px; color: var(--ghost-light);">WASD / 方向键控制</span>
                 </div>
-                <div class="data-row">
-                    <span class="data-label">CPU 温度</span>
-                    <span class="data-value" id="cpuTempValue">35.0°C</span>
-                </div>
-                <div class="data-row">
-                    <span class="data-label">GPU 负载</span>
-                    <span class="data-value" id="gpuLoadValue">0%</span>
-                </div>
-                <div class="data-row">
-                    <span class="data-label">内存使用</span>
-                    <span class="data-value" id="memoryUsageValue">45%</span>
-                </div>
-            </div>
-            
-            <!-- 位置信息 -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">当前位置</span>
-                    <div class="card-icon blue">📍</div>
-                </div>
-                <div class="data-row">
-                    <span class="data-label">坐标</span>
-                    <span class="data-value" id="positionValue">(0.0, 0.0)</span>
-                </div>
-                <div class="data-row">
-                    <span class="data-label">当前航点</span>
-                    <span class="data-value" id="waypointValue">WP001</span>
-                </div>
-                <div class="data-row">
-                    <span class="data-label">运行状态</span>
-                    <span class="data-value" id="statusValue">空闲</span>
+                <div class="card-body">
+                    <div class="dpad">
+                        <div class="dpad-btn empty"></div>
+                        <div class="dpad-btn" data-key="forward" onclick="pressKey('forward')">↑</div>
+                        <div class="dpad-btn empty"></div>
+                        
+                        <div class="dpad-btn" data-key="left" onclick="pressKey('left')">←</div>
+                        <div class="dpad-btn empty"></div>
+                        <div class="dpad-btn" data-key="right" onclick="pressKey('right')">→</div>
+                        
+                        <div class="dpad-btn empty"></div>
+                        <div class="dpad-btn" data-key="backward" onclick="pressKey('backward')">↓</div>
+                        <div class="dpad-btn empty"></div>
+                    </div>
+                    
+                    <div class="action-buttons">
+                        <button class="action-btn primary" onclick="sendCmd('stand_up')">⬆ 起立/趴下</button>
+                        <button class="action-btn" onclick="sendCmd('home')">⌂ 回零</button>
+                        <button class="action-btn danger" onclick="sendCmd('emergency_stop')">⏻ 紧急停止</button>
+                    </div>
                 </div>
             </div>
-            
-            <!-- 告警信息 -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">实时告警</span>
-                    <span class="card-badge" id="alertCount">0</span>
-                </div>
-                <div class="alert-list" id="alertList">
-                    <div class="alert-empty">暂无告警信息</div>
-                </div>
-            </div>
-        </section>
-        
-        <!-- 控制面板 -->
-        <section class="control-section">
-            <div class="control-header">
-                <span class="control-title">运动控制</span>
-                <span class="control-hint">WASD / 方向键控制</span>
-            </div>
-            
-            <div class="dpad">
-                <div class="dpad-btn empty"></div>
-                <div class="dpad-btn" data-key="forward" onclick="pressKey('forward')">↑</div>
-                <div class="dpad-btn empty"></div>
-                
-                <div class="dpad-btn" data-key="left" onclick="pressKey('left')">←</div>
-                <div class="dpad-btn empty"></div>
-                <div class="dpad-btn" data-key="right" onclick="pressKey('right')">→</div>
-                
-                <div class="dpad-btn empty"></div>
-                <div class="dpad-btn" data-key="backward" onclick="pressKey('backward')">↓</div>
-                <div class="dpad-btn empty"></div>
-            </div>
-            
-            <div class="action-buttons">
-                <button class="action-btn primary" onclick="sendCmd('stand_up')">⬆ 起立/趴下</button>
-                <button class="action-btn" onclick="sendCmd('home')">⌂ 回零</button>
-                <button class="action-btn danger" onclick="sendCmd('emergency_stop')">⏻ 紧急停止</button>
-            </div>
-        </section>
-    </main>
-    
-    <!-- Footer -->
-    <footer class="footer">
-        <p>绝影Lite3 电力巡检系统 V1.7 · 广西电力职业技术学院</p>
-    </footer>
+        </main>
+    </div>
     
     <script>
         // WebSocket连接
@@ -876,7 +892,6 @@ GHOST_HTML = """<!DOCTYPE html>
             ws = new WebSocket(wsUrl);
             
             ws.onopen = () => {
-                console.log('WebSocket connected');
                 document.getElementById('connectionStatus').textContent = '已连接';
             };
             
@@ -889,12 +904,9 @@ GHOST_HTML = """<!DOCTYPE html>
                 }
             };
             
-            ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-            };
+            ws.onerror = () => {};
             
             ws.onclose = () => {
-                console.log('WebSocket closed, reconnecting...');
                 document.getElementById('connectionStatus').textContent = '断开';
                 reconnectTimer = setTimeout(connect, 3000);
             };
@@ -907,13 +919,11 @@ GHOST_HTML = """<!DOCTYPE html>
                 // 电池
                 const battery = status.battery || 0;
                 document.getElementById('batteryPercent').textContent = battery + '%';
-                const circumference = 2 * Math.PI * 60;
+                const circumference = 2 * Math.PI * 52;
                 const offset = circumference - (battery / 100) * circumference;
                 const ring = document.getElementById('batteryRing');
                 ring.style.strokeDashoffset = offset;
                 ring.style.stroke = battery > 60 ? 'var(--success)' : battery > 30 ? 'var(--warning)' : 'var(--danger)';
-                
-                // 续航
                 document.getElementById('enduranceValue').textContent = (status.endurance_hours || 1.8).toFixed(1);
                 
                 // 系统状态
@@ -927,19 +937,11 @@ GHOST_HTML = """<!DOCTYPE html>
                 
                 // 位置
                 const pos = status.position || {};
-                document.getElementById('positionValue').textContent = 
-                    `(${pos.x.toFixed(1)}, ${pos.y.toFixed(1)})`;
+                document.getElementById('positionValue').textContent = `(${pos.x.toFixed(1)}, ${pos.y.toFixed(1)})`;
                 document.getElementById('waypointValue').textContent = status.waypoint || 'WP001';
                 
-                // 状态
-                const statusEl = document.getElementById('statusValue');
-                const statusMap = {
-                    'idle': '空闲',
-                    'moving': '移动中',
-                    'inspecting': '巡检中',
-                    'standing': '起立中'
-                };
-                statusEl.textContent = statusMap[status.status] || '未知';
+                const statusMap = { 'idle': '空闲', 'moving': '移动中', 'inspecting': '巡检中', 'standing': '起立中' };
+                document.getElementById('statusValue').textContent = statusMap[status.status] || '未知';
                 
                 // 进度
                 const completed = status.completed_waypoints || 0;
@@ -953,17 +955,13 @@ GHOST_HTML = """<!DOCTYPE html>
         
         function addAlert(alert) {
             const list = document.getElementById('alertList');
-            
-            // 清空空状态提示
-            const empty = list.querySelector('.alert-empty');
+            const empty = list.querySelector('.empty-state');
             if (empty) empty.remove();
             
             const item = document.createElement('div');
             item.className = `alert-item ${alert.level || ''}`;
             item.innerHTML = `
-                <div class="alert-indicator ${alert.level || ''}">
-                    ${alert.level === 'danger' ? '🔴' : '🟡'}
-                </div>
+                <div class="alert-icon ${alert.level || ''}">${alert.level === 'danger' ? '🔴' : '🟡'}</div>
                 <div class="alert-content">
                     <div class="alert-message">${alert.message}</div>
                     <div class="alert-time">${new Date(alert.timestamp).toLocaleTimeString('zh-CN')}</div>
@@ -971,13 +969,9 @@ GHOST_HTML = """<!DOCTYPE html>
             `;
             list.insertBefore(item, list.firstChild);
             
-            // 限制显示数量
-            while (list.children.length > 10) {
-                list.removeChild(list.lastChild);
-            }
-            
-            // 更新告警数量
+            while (list.children.length > 10) list.removeChild(list.lastChild);
             document.getElementById('alertCount').textContent = list.children.length;
+            document.getElementById('alertBadge').textContent = list.children.length;
         }
         
         function pressKey(key) {
@@ -992,27 +986,22 @@ GHOST_HTML = """<!DOCTYPE html>
             }
         }
         
-        // 键盘控制（完整实现）
+        function fetchDemo() {
+            fetch('/api/demo', { method: 'POST' });
+        }
+        
+        // 键盘控制
         document.addEventListener('keydown', (e) => {
             const keyMap = {
-                'w': 'forward', 'W': 'forward',
-                's': 'backward', 'S': 'backward',
-                'a': 'left', 'A': 'left',
-                'd': 'right', 'D': 'right',
-                'ArrowUp': 'forward',
-                'ArrowDown': 'backward',
-                'ArrowLeft': 'left',
-                'ArrowRight': 'right',
-                ' ': 'stand_up',
-                'Escape': 'emergency_stop'
+                'w': 'forward', 's': 'backward', 'a': 'left', 'd': 'right',
+                'ArrowUp': 'forward', 'ArrowDown': 'backward',
+                'ArrowLeft': 'left', 'ArrowRight': 'right',
+                ' ': 'stand_up', 'Escape': 'emergency_stop'
             };
-            
             const key = keyMap[e.key];
             if (key) {
                 e.preventDefault();
                 pressKey(key);
-                
-                // 视觉反馈
                 const btn = document.querySelector(`.dpad-btn[data-key="${key}"]`);
                 if (btn) {
                     btn.style.transform = 'scale(0.9)';
@@ -1022,20 +1011,11 @@ GHOST_HTML = """<!DOCTYPE html>
         });
         
         // 更新时间
-        function updateTime() {
+        setInterval(() => {
             document.getElementById('currentTime').textContent = 
                 new Date().toLocaleTimeString('zh-CN');
-        }
+        }, 1000);
         
-        // 定时更新状态
-        setInterval(updateTime, 1000);
-        setInterval(() => {
-            fetch('/api/status').then(r => r.json()).then(d => {
-                document.getElementById('clientCount').textContent = d.clients;
-            }).catch(() => {});
-        }, 2000);
-        
-        // 初始化
         connect();
     </script>
 </body>
@@ -1052,81 +1032,6 @@ def send_udp(cmd: int, value: int = 0):
         motion_sock.sendto(packet, (MOTION_HOST, MOTION_PORT))
     except Exception as e:
         logger.error(f"UDP发送失败: {e}")
-
-
-def calculate_velocity():
-    vx, vy, vw = 0.0, 0.0, 0.0
-    speed = 0.5
-    if key_state["forward"]: vy -= speed
-    if key_state["backward"]: vy += speed
-    if key_state["left"]: vx -= speed
-    if key_state["right"]: vx += speed
-    if key_state["turn_left"]: vw -= speed
-    if key_state["turn_right"]: vw += speed
-    return vx, vy, vw
-
-
-def send_velocity_command():
-    vx, vy, vw = calculate_velocity()
-    if vx != 0 or vy != 0 or vw != 0:
-        magnitude = (vx**2 + vy**2 + vw**2)**0.5
-        if magnitude > 1.0:
-            vx, vy, vw = vx/magnitude, vy/magnitude, vw/magnitude
-        robot_status["status"] = "moving"
-        send_udp(CMD_MOVE_MODE)
-        if vy != 0: send_udp(CMD_FORWARD, int(vy * 6553))
-        if vx != 0: send_udp(CMD_LEFT, int(vx * 6553))
-        if vw != 0: send_udp(CMD_TURN, int(vw * 9553))
-    else:
-        if not any(key_state.values()):
-            send_udp(CMD_EMERGENCY_STOP)
-            robot_status["status"] = "idle"
-
-
-@app.get("/")
-async def root():
-    return HTMLResponse(GHOST_HTML)
-
-
-@app.get("/api/status")
-async def status():
-    return {"clients": len(connections), "inspections": len(inspections),
-            "alerts": len([a for a in alerts if not a.get("ack")])}
-
-
-@app.get("/api/robot")
-async def get_robot():
-    return robot_status
-
-
-@app.get("/api/keys")
-async def get_keys():
-    return key_state
-
-
-@app.post("/api/demo")
-async def demo():
-    import random
-    robot_status.update({
-        "battery": random.randint(60, 95),
-        "cpu_temp": round(random.uniform(35, 55), 1),
-        "gpu_load": random.randint(20, 80),
-        "memory_usage": random.randint(40, 70),
-        "waypoint": f"WP{random.randint(1,5):03d}",
-        "completed_waypoints": random.randint(1, 4),
-        "endurance_hours": round(random.uniform(1.5, 2.5), 1),
-        "status": "inspecting"
-    })
-    inspections.append({
-        "time": datetime.now().strftime("%H:%M:%S"),
-        "cracks": random.randint(0, 3),
-        "temp": round(random.uniform(25, 55), 1),
-        "status": random.choice(["NORMAL", "WARN", "CRITICAL"])
-    })
-    for ws in connections:
-        await ws.send_json({"type": "inspection", "data": inspections[-1]})
-        await ws.send_json({"type": "robot_status", "data": robot_status})
-    return {"status": "ok"}
 
 
 class Monitor:
@@ -1170,50 +1075,18 @@ class Monitor:
         elif msg_type == "system_status":
             robot_status.update(data.get("payload", {}))
 
-        # ========== 新增：键盘控制处理 ==========
         elif msg_type == "key":
             key = data.get("key", "")
             action = data.get("action", "")
             
             key_mapping = {
-                "forward": ("forward", True),
-                "backward": ("backward", True),
-                "left": ("left", True),
-                "right": ("right", True),
-                "turn_left": ("turn_left", True),
-                "turn_right": ("turn_right", True),
-                "stand_up": ("stand", True),
+                "forward": True, "backward": True, "left": True, "right": True,
+                "turn_left": True, "turn_right": True, "stand": True
             }
             
             if key in key_mapping:
-                key_name, _ = key_mapping[key]
-                if action == "press":
-                    key_state[key_name] = True
-                    logger.info(f"按键按下: {key}")
-                elif action == "release":
-                    key_state[key_name] = False
-                    logger.info(f"按键释放: {key}")
-                
-                # 发送UDP控制指令
-                send_velocity_command()
-
-        # ========== 新增：命令处理 ==========
-        elif msg_type == "command":
-            cmd = data.get("command", "")
-            logger.info(f"收到命令: {cmd}")
-            
-            if cmd == "stand_up":
-                send_udp(CMD_STAND_UP)
-                robot_status["status"] = "standing"
-            elif cmd == "emergency_stop":
-                send_udp(CMD_EMERGENCY_STOP)
-                robot_status["status"] = "idle"
-                # 重置所有按键状态
-                for k in key_state:
-                    key_state[k] = False
-            elif cmd == "home":
-                send_udp(CMD_HOME)
-                robot_status["position"] = {"x": 0.0, "y": 0.0}
+                key_state[key] = action == "press"
+                logger.info(f"按键: {key} = {key_state[key]}")
 
 
 monitor = Monitor()
@@ -1249,6 +1122,47 @@ async def ws_server():
     async with websockets.serve(handler, "0.0.0.0", WS_PORT):
         logger.info(f"WebSocket服务器启动: ws://0.0.0.0:{WS_PORT}")
         await asyncio.Future()
+
+
+@app.get("/")
+async def root():
+    return HTMLResponse(GHOST_ADMIN_HTML)
+
+
+@app.get("/api/status")
+async def status():
+    return {"clients": len(connections), "inspections": len(inspections),
+            "alerts": len([a for a in alerts if not a.get("ack")])}
+
+
+@app.get("/api/robot")
+async def get_robot():
+    return robot_status
+
+
+@app.post("/api/demo")
+async def demo():
+    import random
+    robot_status.update({
+        "battery": random.randint(60, 95),
+        "cpu_temp": round(random.uniform(35, 55), 1),
+        "gpu_load": random.randint(20, 80),
+        "memory_usage": random.randint(40, 70),
+        "waypoint": f"WP{random.randint(1,5):03d}",
+        "completed_waypoints": random.randint(1, 4),
+        "endurance_hours": round(random.uniform(1.5, 2.5), 1),
+        "status": "inspecting"
+    })
+    inspections.append({
+        "time": datetime.now().strftime("%H:%M:%S"),
+        "cracks": random.randint(0, 3),
+        "temp": round(random.uniform(25, 55), 1),
+        "status": random.choice(["NORMAL", "WARN", "CRITICAL"])
+    })
+    for ws_conn in connections:
+        await ws_conn.send_json({"type": "inspection", "data": inspections[-1]})
+        await ws_conn.send_json({"type": "robot_status", "data": robot_status})
+    return {"status": "ok"}
 
 
 async def main():
