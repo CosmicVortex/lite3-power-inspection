@@ -53,9 +53,9 @@ graph TB
         CAM["可见光 + 热成像<br/>RTSP推流"]
     end
     
-    WS -->|WebSocket ws://<IP>:8765/ws| WG
-    MOTION -->|UDP :43893| UDP
-    CAM -->|RTSP :554| VS
+    WS -->|"WebSocket ws://<IP>:8765/ws"| WG
+    MOTION -->|"UDP :43893"| UDP
+    CAM -->|"RTSP :554"| VS
     MAIN --> UDP
     MAIN --> WG
     UDP --> WB
@@ -63,8 +63,6 @@ graph TB
     WB --> TEMP
     VS --> PTZ
 ```
-
-![系统架构图](docs/assets/04-系统架构图.png)
 
 ---
 
@@ -134,19 +132,17 @@ flowchart TD
         CTRL["运动控制<br/>指令下发"]
     end
     
-    CAM -->|RTSP :554| VS
+    CAM -->|"RTSP :554"| VS
     VS --> CB
     VS --> TM
     VS --> RD
-    CB -->|检测结果| WG
-    TM -->|温度告警| WG
-    RD -->|状态数据| WG
-    WG -->|WebSocket :8765| WEB
-    WEB -->|控制指令| CTRL
-    CTRL -->|UDP :43894| PS
+    CB -->|"检测结果"| WG
+    TM -->|"温度告警"| WG
+    RD -->|"状态数据"| WG
+    WG -->|"WebSocket :8765"| WEB
+    WEB -->|"控制指令"| CTRL
+    CTRL -->|"UDP :43894"| PS
 ```
-
-![数据流图](docs/assets/05-数据流图.png)
 
 ---
 
@@ -175,41 +171,38 @@ flowchart TD
     LOOP --> MODE_SELECT
 ```
 
-![软件流程图](docs/assets/06-软件流程图.png)
-
 ---
 
 ## 部署运维
 
 ### 感知主机部署（Jetson NX）
 
-```bash
-# 1. 通过MobaXterm SCP上传代码
-scp -r src/ ysc@192.168.1.103:/home/ysc/
-
-# 2. SSH登录配置
-ssh ysc@192.168.1.103
-cd ~
-vim config/inspection_config.yaml
-# 修改 MONITOR_HOST 为监测平台IP
-
-# 3. 安装依赖并启动
-pip3 install -r requirements.txt
-python3 src/app/main.py
-```
+- [ ] **SSH登录**：`ssh ysc@192.168.1.103`（密码: `'` 英文单引号）
+- [ ] **解压部署包**：`unzip -q ~/lite3-power-inspection.zip`
+- [ ] **安装依赖**：`./scripts/offline_install.sh sensors`
+- [ ] **配置WebSocket**：`sed -i 's|MONITOR_HOST|<笔记本IP>|' config/inspection_config.yaml`
+- [ ] **运行演示**：`python3 scripts/run_demo.py --mode simulation`
 
 ### 监测平台部署（Windows笔记本）
 
-```powershell
-# 解压监测平台包
-unzip monitor-platform-portable.zip
+- [ ] **解压便携包**到任意目录（如 `D:\monitor-platform`）
+- [ ] **双击运行**：`start_monitor.bat`
+- [ ] **访问界面**：`http://localhost:8000`
 
-# 修改配置（IP地址）
-# 编辑 server.py 中的 MONITOR_HOST
+### 启动顺序
 
-# 启动服务
-start_monitor.bat
-# 访问 http://localhost:8000
+```
+1. 先启动监测平台（笔记本）
+   → 双击 start_monitor.bat
+   → 等待出现 "Monitor Platform Started Successfully!"
+
+2. 再启动感知主机巡检程序
+   → SSH登录感知主机
+   → python3 scripts/run_demo.py --mode simulation
+
+3. 验证连接
+   → 浏览器打开 http://localhost:8000
+   → 确认显示"已连接"和实时数据
 ```
 
 详见：[部署运维与故障排查文档](docs/01-技术方案/03-部署运维与故障排查.md)
@@ -233,7 +226,7 @@ TEMP_ALARM: 50                    # 温度告警阈值(℃)
 ## 故障排查
 
 | 现象 | 可能原因 | 解决方案 |
-|------|---------|---------|
+|------|---------|----------|
 | WebSocket连接失败 | 监测平台未启动 | 确认server.py运行中 |
 | 视频流无画面 | RTSP端口不通 | 检查云台相机网络连通性 |
 | UDP数据丢失 | 防火墙拦截 | 开放43893/43894端口 |
