@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-绝影Lite3 监测平台 - 现代化UI升级版
-参考Ghost CMS + xh-admin-frontend设计理念：极简、专业、高质量视觉
+绝影Lite3 监测平台 - Ghost CMS风格UI升级版
+参考Ghost CMS设计理念：极简、专业、高质量视觉、大量留白
+适应电力巡检主题内容
 """
 
 import asyncio, json, time, logging, struct, socket, base64
@@ -9,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 from fastapi import FastAPI, WebSocket
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 import uvicorn
 import websockets
 
@@ -61,46 +62,87 @@ motion_sock = None
 key_state = {"forward": False, "backward": False, "left": False, "right": False,
              "turn_left": False, "turn_right": False, "stand": False}
 
-# ========== 现代化UI HTML ==========
-MODERN_HTML = """<!DOCTYPE html>
+# ========== Ghost CMS风格UI ==========
+GHOST_HTML = """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>绝影Lite3 · 电力巡检监控中心</title>
     <style>
+        /* ========== Ghost CMS设计系统 ========== */
         :root {
-            --primary: #ff6b35;
-            --primary-light: #ff8f5a;
-            --success: #00c853;
-            --warning: #ffb300;
-            --danger: #ff3d00;
-            --info: #2196f3;
-            --bg: #f5f7fa;
-            --surface: #ffffff;
-            --text: #1a1a1a;
-            --text-secondary: #666;
-            --border: #e8e8e8;
-            --shadow: 0 4px 20px rgba(0,0,0,0.08);
+            /* Ghost品牌色 */
+            --ghost-black: #15171A;
+            --ghost-dark: #222429;
+            --ghost-gray: #3A3E47;
+            --ghost-mid: #515761;
+            --ghost-light: #6B727A;
+            --ghost-pale: #Brodie: #D4D7DC;
+            --ghost-palest: #F1F3F5;
+            --ghost-white: #FFFFFF;
+            
+            /* 主题色（电力巡检） */
+            --primary: #FF6B35;
+            --primary-light: #FF8F5A;
+            --success: #00C853;
+            --warning: #FFB300;
+            --danger: #FF3D00;
+            --info: #2196F3;
+            
+            /* 间距系统 */
+            --space-xs: 4px;
+            --space-sm: 8px;
+            --space-md: 16px;
+            --space-lg: 24px;
+            --space-xl: 32px;
+            --space-2xl: 48px;
+            --space-3xl: 64px;
+            
+            /* 圆角 */
+            --radius-sm: 4px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            --radius-xl: 16px;
+            --radius-full: 9999px;
+            
+            /* 阴影 */
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1);
+            --shadow-xl: 0 20px 25px -5px rgba(0,0,0,0.1);
         }
         
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
-            background: var(--bg);
-            color: var(--text);
+        /* ========== 基础重置 ========== */
+        *, *::before, *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        html {
+            font-size: 16px;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--ghost-palest);
+            color: var(--ghost-gray);
+            line-height: 1.6;
             min-height: 100vh;
         }
         
-        /* 顶部导航 */
+        /* ========== 顶部导航（Ghost风格：简洁、白色、sticky） ========== */
         .header {
-            background: var(--surface);
-            padding: 0 32px;
-            height: 64px;
+            background: var(--ghost-white);
+            border-bottom: 1px solid var(--ghost-pale);
+            padding: 0 var(--space-xl);
+            height: 60px;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            box-shadow: var(--shadow);
             position: sticky;
             top: 0;
             z-index: 100;
@@ -109,221 +151,358 @@ MODERN_HTML = """<!DOCTYPE html>
         .logo {
             display: flex;
             align-items: center;
-            gap: 12px;
-            font-size: 20px;
-            font-weight: 600;
-            color: var(--primary);
+            gap: var(--space-md);
+            text-decoration: none;
+            color: var(--ghost-black);
         }
         
         .logo-icon {
-            width: 40px;
-            height: 40px;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
-            border-radius: 10px;
+            width: 32px;
+            height: 32px;
+            background: var(--primary);
+            border-radius: var(--radius-md);
             display: flex;
             align-items: center;
             justify-content: center;
             color: white;
-            font-size: 20px;
+            font-size: 18px;
+        }
+        
+        .logo-text {
+            font-size: 18px;
+            font-weight: 600;
+            letter-spacing: -0.3px;
+        }
+        
+        .logo-subtitle {
+            font-size: 12px;
+            color: var(--ghost-light);
+            font-weight: 400;
+            margin-left: var(--space-sm);
+            padding-left: var(--space-sm);
+            border-left: 1px solid var(--ghost-pale);
         }
         
         .header-right {
             display: flex;
             align-items: center;
-            gap: 20px;
+            gap: var(--space-lg);
         }
         
         .status-badge {
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 6px 16px;
-            background: #f0fdf4;
-            border-radius: 20px;
-            font-size: 14px;
+            gap: var(--space-sm);
+            padding: var(--space-sm) var(--space-md);
+            background: #ECFDF5;
+            border-radius: var(--radius-full);
+            font-size: 13px;
             color: var(--success);
+            font-weight: 500;
         }
         
         .status-dot {
-            width: 8px;
-            height: 8px;
+            width: 6px;
+            height: 6px;
             background: var(--success);
             border-radius: 50%;
             animation: pulse 2s infinite;
         }
         
         @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
         }
         
-        /* 主内容区 */
+        .time-display {
+            font-size: 13px;
+            color: var(--ghost-light);
+            font-variant-numeric: tabular-nums;
+        }
+        
+        /* ========== 主内容区（大量留白） ========== */
         .main {
-            max-width: 1400px;
+            max-width: 1200px;
             margin: 0 auto;
-            padding: 24px;
+            padding: var(--space-2xl) var(--space-xl);
         }
         
-        /* Hero区域 */
+        /* ========== Ghost风格Hero区域 ========== */
         .hero {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
-            border-radius: 20px;
-            padding: 40px;
-            color: white;
-            margin-bottom: 24px;
+            background: var(--ghost-white);
+            border-radius: var(--radius-xl);
+            padding: var(--space-3xl);
+            margin-bottom: var(--space-2xl);
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--ghost-pale);
+        }
+        
+        .hero-header {
             display: flex;
             justify-content: space-between;
-            align-items: center;
+            align-items: flex-start;
+            margin-bottom: var(--space-2xl);
         }
         
-        .hero-content h1 {
-            font-size: 32px;
+        .hero-title {
+            font-size: 42px;
             font-weight: 700;
-            margin-bottom: 8px;
+            color: var(--ghost-black);
+            letter-spacing: -1.5px;
+            line-height: 1.1;
+            margin-bottom: var(--space-sm);
         }
         
-        .hero-content p {
-            opacity: 0.9;
-            font-size: 16px;
+        .hero-subtitle {
+            font-size: 18px;
+            color: var(--ghost-light);
+            font-weight: 400;
         }
         
-        .hero-stats {
-            display: flex;
-            gap: 32px;
+        .hero-meta {
+            text-align: right;
         }
         
-        .hero-stat {
-            text-align: center;
-        }
-        
-        .hero-stat-value {
-            font-size: 36px;
+        .hero-meta-value {
+            font-size: 48px;
             font-weight: 700;
+            color: var(--primary);
+            letter-spacing: -2px;
+            line-height: 1;
         }
         
-        .hero-stat-label {
-            font-size: 14px;
-            opacity: 0.8;
+        .hero-meta-label {
+            font-size: 13px;
+            color: var(--ghost-light);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: var(--space-sm);
         }
         
-        /* 卡片网格 */
+        /* ========== 卡片网格（Ghost风格：大间距、简洁） ========== */
         .cards-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 24px;
-            margin-bottom: 24px;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: var(--space-xl);
+            margin-bottom: var(--space-2xl);
         }
         
         .card {
-            background: var(--surface);
-            border-radius: 16px;
-            padding: 24px;
-            box-shadow: var(--shadow);
-            transition: transform 0.2s;
+            background: var(--ghost-white);
+            border-radius: var(--radius-xl);
+            padding: var(--space-xl);
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--ghost-pale);
+            transition: all 0.2s ease;
         }
         
         .card:hover {
-            transform: translateY(-4px);
+            box-shadow: var(--shadow-md);
+            transform: translateY(-2px);
         }
         
         .card-header {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 20px;
+            margin-bottom: var(--space-lg);
+            padding-bottom: var(--space-md);
+            border-bottom: 1px solid var(--ghost-palest);
         }
         
         .card-title {
-            font-size: 16px;
+            font-size: 14px;
             font-weight: 600;
-            color: var(--text);
+            color: var(--ghost-black);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .card-badge {
+            font-size: 11px;
+            padding: 2px 8px;
+            background: var(--ghost-palest);
+            color: var(--ghost-light);
+            border-radius: var(--radius-full);
+            font-weight: 500;
         }
         
         .card-icon {
-            width: 40px;
-            height: 40px;
-            border-radius: 10px;
+            width: 36px;
+            height: 36px;
+            border-radius: var(--radius-md);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 20px;
+            font-size: 18px;
         }
         
-        .card-icon.orange { background: #fff3e0; }
-        .card-icon.green { background: #e8f5e9; }
-        .card-icon.blue { background: #e3f2fd; }
-        .card-icon.red { background: #ffebee; }
+        .card-icon.orange { background: #FFF3E0; }
+        .card-icon.green { background: #E8F5E9; }
+        .card-icon.blue { background: #E3F2FD; }
+        .card-icon.red { background: #FFEbee; }
         
-        /* 电池环形 */
+        /* ========== 电池环形（优化版） ========== */
+        .battery-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: var(--space-md);
+        }
+        
         .battery-ring {
             position: relative;
-            width: 120px;
-            height: 120px;
-            margin: 0 auto;
+            width: 140px;
+            height: 140px;
         }
         
         .battery-ring svg {
             transform: rotate(-90deg);
+            filter: drop-shadow(0 2px 8px rgba(0,0,0,0.1));
         }
         
         .battery-ring-bg {
             fill: none;
-            stroke: #f0f0f0;
-            stroke-width: 8;
+            stroke: var(--ghost-palest);
+            stroke-width: 10;
         }
         
         .battery-ring-fill {
             fill: none;
             stroke: var(--success);
-            stroke-width: 8;
+            stroke-width: 10;
             stroke-linecap: round;
-            transition: stroke-dashoffset 0.5s ease;
+            transition: stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1);
         }
         
-        .battery-percent {
+        .battery-center {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            font-size: 28px;
-            font-weight: 700;
-            color: var(--text);
+            text-align: center;
         }
         
-        /* 控制面板 */
-        .control-panel {
-            background: var(--surface);
-            border-radius: 16px;
-            padding: 24px;
-            box-shadow: var(--shadow);
+        .battery-percent {
+            font-size: 36px;
+            font-weight: 700;
+            color: var(--ghost-black);
+            letter-spacing: -1px;
+            line-height: 1;
+        }
+        
+        .battery-label {
+            font-size: 12px;
+            color: var(--ghost-light);
+            margin-top: var(--space-xs);
+        }
+        
+        .battery-info {
+            text-align: center;
+        }
+        
+        .battery-endurance {
+            font-size: 14px;
+            color: var(--ghost-gray);
+        }
+        
+        .battery-endurance strong {
+            color: var(--ghost-black);
+            font-weight: 600;
+        }
+        
+        /* ========== 数据展示（Ghost风格：简洁大字体） ========== */
+        .data-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: var(--space-md) 0;
+            border-bottom: 1px solid var(--ghost-palest);
+        }
+        
+        .data-row:last-child {
+            border-bottom: none;
+        }
+        
+        .data-label {
+            font-size: 14px;
+            color: var(--ghost-light);
+        }
+        
+        .data-value {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--ghost-black);
+            font-variant-numeric: tabular-nums;
+        }
+        
+        .data-value.warning {
+            color: var(--warning);
+        }
+        
+        .data-value.danger {
+            color: var(--danger);
+        }
+        
+        /* ========== 控制面板（Ghost风格：简洁清晰） ========== */
+        .control-section {
+            background: var(--ghost-white);
+            border-radius: var(--radius-xl);
+            padding: var(--space-xl);
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--ghost-pale);
+            margin-bottom: var(--space-xl);
+        }
+        
+        .control-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: var(--space-lg);
+        }
+        
+        .control-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--ghost-black);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .control-hint {
+            font-size: 13px;
+            color: var(--ghost-light);
         }
         
         .dpad {
             display: grid;
-            grid-template-columns: repeat(3, 60px);
-            grid-template-rows: repeat(3, 60px);
-            gap: 8px;
-            margin: 20px auto;
+            grid-template-columns: repeat(3, 64px);
+            grid-template-rows: repeat(3, 64px);
+            gap: var(--space-sm);
+            margin: var(--space-xl) auto;
             width: fit-content;
         }
         
         .dpad-btn {
-            width: 60px;
-            height: 60px;
-            border: none;
-            border-radius: 12px;
-            background: var(--bg);
+            width: 64px;
+            height: 64px;
+            border: 1px solid var(--ghost-pale);
+            border-radius: var(--radius-lg);
+            background: var(--ghost-white);
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 24px;
-            transition: all 0.2s;
+            color: var(--ghost-gray);
+            transition: all 0.15s ease;
         }
         
         .dpad-btn:hover {
             background: var(--primary);
+            border-color: var(--primary);
             color: white;
+            transform: scale(1.05);
         }
         
         .dpad-btn:active {
@@ -332,70 +511,122 @@ MODERN_HTML = """<!DOCTYPE html>
         
         .dpad-btn.empty {
             background: transparent;
+            border: none;
             cursor: default;
+            pointer-events: none;
         }
         
         .action-buttons {
             display: flex;
-            gap: 12px;
+            gap: var(--space-md);
             justify-content: center;
-            margin-top: 20px;
+            margin-top: var(--space-xl);
+            padding-top: var(--space-lg);
+            border-top: 1px solid var(--ghost-palest);
         }
         
         .action-btn {
-            padding: 12px 24px;
-            border: none;
-            border-radius: 8px;
+            padding: var(--space-md) var(--space-xl);
+            border: 1px solid var(--ghost-pale);
+            border-radius: var(--radius-md);
             font-size: 14px;
             font-weight: 500;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.15s ease;
+            background: var(--ghost-white);
+            color: var(--ghost-gray);
+        }
+        
+        .action-btn:hover {
+            border-color: var(--ghost-mid);
+            color: var(--ghost-black);
         }
         
         .action-btn.primary {
             background: var(--primary);
+            border-color: var(--primary);
             color: white;
+        }
+        
+        .action-btn.primary:hover {
+            background: var(--primary-light);
+            border-color: var(--primary-light);
         }
         
         .action-btn.danger {
             background: var(--danger);
+            border-color: var(--danger);
             color: white;
         }
         
-        .action-btn:hover {
-            opacity: 0.9;
-            transform: translateY(-2px);
+        .action-btn.danger:hover {
+            background: #E53935;
+            border-color: #E53935;
         }
         
-        /* 告警列表 */
+        /* ========== 告警列表（Ghost风格：时间线设计） ========== */
         .alert-list {
-            max-height: 300px;
+            max-height: 320px;
             overflow-y: auto;
+            padding-right: var(--space-sm);
+        }
+        
+        .alert-list::-webkit-scrollbar {
+            width: 4px;
+        }
+        
+        .alert-list::-webkit-scrollbar-track {
+            background: var(--ghost-palest);
+            border-radius: 2px;
+        }
+        
+        .alert-list::-webkit-scrollbar-thumb {
+            background: var(--ghost-pale);
+            border-radius: 2px;
         }
         
         .alert-item {
             display: flex;
-            align-items: flex-start;
-            gap: 12px;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 8px;
-            background: var(--bg);
+            gap: var(--space-md);
+            padding: var(--space-md);
+            border-radius: var(--radius-md);
+            margin-bottom: var(--space-sm);
+            background: var(--ghost-palest);
+            transition: all 0.2s ease;
         }
         
-        .alert-item.warning { background: #fff8e1; }
-        .alert-item.danger { background: #ffebee; }
+        .alert-item:hover {
+            background: var(--ghost-pale);
+        }
         
-        .alert-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            margin-top: 6px;
+        .alert-item.warning {
+            background: #FFF8E1;
+        }
+        
+        .alert-item.danger {
+            background: #FFEBEE;
+        }
+        
+        .alert-indicator {
+            width: 32px;
+            height: 32px;
+            border-radius: var(--radius-full);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
             flex-shrink: 0;
         }
         
-        .alert-dot.warning { background: var(--warning); }
-        .alert-dot.danger { background: var(--danger); }
+        .alert-indicator.warning {
+            background: var(--warning);
+            color: white;
+        }
+        
+        .alert-indicator.danger {
+            background: var(--danger);
+            color: white;
+        }
         
         .alert-content {
             flex: 1;
@@ -403,69 +634,74 @@ MODERN_HTML = """<!DOCTYPE html>
         
         .alert-message {
             font-size: 14px;
-            color: var(--text);
+            color: var(--ghost-black);
+            font-weight: 500;
         }
         
         .alert-time {
             font-size: 12px;
-            color: var(--text-secondary);
-            margin-top: 4px;
+            color: var(--ghost-light);
+            margin-top: var(--space-xs);
         }
         
-        /* 数据表格 */
-        .data-table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        
-        .data-table th,
-        .data-table td {
-            padding: 12px 16px;
-            text-align: left;
-            border-bottom: 1px solid var(--border);
-        }
-        
-        .data-table th {
-            font-size: 12px;
-            font-weight: 600;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-        }
-        
-        .data-table td {
+        .alert-empty {
+            text-align: center;
+            padding: var(--space-2xl);
+            color: var(--ghost-light);
             font-size: 14px;
         }
         
-        .tag {
-            display: inline-flex;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 500;
+        /* ========== 进度条（Ghost风格） ========== */
+        .progress-bar {
+            height: 4px;
+            background: var(--ghost-palest);
+            border-radius: var(--radius-full);
+            overflow: hidden;
+            margin-top: var(--space-md);
         }
         
-        .tag.success { background: #e8f5e9; color: #2e7d32; }
-        .tag.warning { background: #fff8e1; color: #f57c00; }
-        .tag.danger { background: #ffebee; color: #c62828; }
+        .progress-fill {
+            height: 100%;
+            background: var(--primary);
+            border-radius: var(--radius-full);
+            transition: width 0.5s ease;
+        }
         
-        /* 底部 */
+        /* ========== Footer ========== */
         .footer {
             text-align: center;
-            padding: 24px;
-            color: var(--text-secondary);
-            font-size: 14px;
+            padding: var(--space-2xl);
+            color: var(--ghost-light);
+            font-size: 13px;
+            border-top: 1px solid var(--ghost-pale);
+            margin-top: var(--space-2xl);
         }
         
-        /* 响应式 */
+        /* ========== 响应式 ========== */
         @media (max-width: 768px) {
-            .hero {
-                flex-direction: column;
-                text-align: center;
-                gap: 24px;
+            .header {
+                padding: 0 var(--space-md);
             }
             
-            .hero-stats {
-                justify-content: center;
+            .main {
+                padding: var(--space-lg) var(--space-md);
+            }
+            
+            .hero {
+                padding: var(--space-xl);
+            }
+            
+            .hero-header {
+                flex-direction: column;
+                gap: var(--space-lg);
+            }
+            
+            .hero-meta {
+                text-align: left;
+            }
+            
+            .hero-title {
+                font-size: 28px;
             }
             
             .cards-grid {
@@ -477,35 +713,43 @@ MODERN_HTML = """<!DOCTYPE html>
 <body>
     <!-- 顶部导航 -->
     <header class="header">
-        <div class="logo">
+        <a href="/" class="logo">
             <div class="logo-icon">🤖</div>
-            <span>绝影Lite3 · 电力巡检监控中心</span>
-        </div>
+            <span class="logo-text">绝影Lite3</span>
+            <span class="logo-subtitle">电力巡检监控中心</span>
+        </a>
         <div class="header-right">
             <div class="status-badge">
                 <span class="status-dot"></span>
                 <span id="connectionStatus">已连接</span>
             </div>
-            <span id="currentTime" style="color: var(--text-secondary);"></span>
+            <span class="time-display" id="currentTime"></span>
         </div>
     </header>
     
     <!-- 主内容 -->
     <main class="main">
-        <!-- Hero区域 -->
+        <!-- Hero区域（Ghost风格：大标题+关键数据） -->
         <section class="hero">
-            <div class="hero-content">
-                <h1>实时巡检监控</h1>
-                <p>绝影Lite3专业版 · 智能电力巡检系统</p>
-            </div>
-            <div class="hero-stats">
-                <div class="hero-stat">
-                    <div class="hero-stat-value" id="clientCount">0</div>
-                    <div class="hero-stat-label">在线设备</div>
+            <div class="hero-header">
+                <div>
+                    <h1 class="hero-title">实时巡检监控</h1>
+                    <p class="hero-subtitle">绝影Lite3专业版 · 智能电力巡检系统</p>
                 </div>
-                <div class="hero-stat">
-                    <div class="hero-stat-value" id="alertCount">0</div>
-                    <div class="hero-stat-label">告警数量</div>
+                <div class="hero-meta">
+                    <div class="hero-meta-value" id="clientCount">0</div>
+                    <div class="hero-meta-label">在线设备</div>
+                </div>
+            </div>
+            
+            <!-- 进度条：巡检进度 -->
+            <div style="margin-top: var(--space-xl);">
+                <div style="display: flex; justify-content: space-between; margin-bottom: var(--space-sm);">
+                    <span style="font-size: 13px; color: var(--ghost-light);">巡检进度</span>
+                    <span style="font-size: 13px; color: var(--ghost-gray); font-weight: 500;" id="progressText">0 / 5</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill" style="width: 0%;"></div>
                 </div>
             </div>
         </section>
@@ -518,16 +762,21 @@ MODERN_HTML = """<!DOCTYPE html>
                     <span class="card-title">电池状态</span>
                     <div class="card-icon orange">🔋</div>
                 </div>
-                <div class="battery-ring">
-                    <svg width="120" height="120" viewBox="0 0 120 120">
-                        <circle class="battery-ring-bg" cx="60" cy="60" r="52"/>
-                        <circle class="battery-ring-fill" id="batteryRing" cx="60" cy="60" r="52"
-                                stroke-dasharray="326.7" stroke-dashoffset="100"/>
-                    </svg>
-                    <span class="battery-percent" id="batteryPercent">68%</span>
-                </div>
-                <div style="text-align: center; margin-top: 16px; color: var(--text-secondary);">
-                    预估续航 <span id="enduranceValue" style="color: var(--text); font-weight: 600;">1.8</span> 小时
+                <div class="battery-container">
+                    <div class="battery-ring">
+                        <svg width="140" height="140" viewBox="0 0 140 140">
+                            <circle class="battery-ring-bg" cx="70" cy="70" r="60"/>
+                            <circle class="battery-ring-fill" id="batteryRing" cx="70" cy="70" r="60"
+                                    stroke-dasharray="377" stroke-dashoffset="113"/>
+                        </svg>
+                        <div class="battery-center">
+                            <div class="battery-percent" id="batteryPercent">68%</div>
+                            <div class="battery-label">电量</div>
+                        </div>
+                    </div>
+                    <div class="battery-info">
+                        <div class="battery-endurance">预估续航 <strong id="enduranceValue">1.8</strong> 小时</div>
+                    </div>
                 </div>
             </div>
             
@@ -537,20 +786,18 @@ MODERN_HTML = """<!DOCTYPE html>
                     <span class="card-title">系统状态</span>
                     <div class="card-icon green">📊</div>
                 </div>
-                <table class="data-table">
-                    <tr>
-                        <td>CPU 温度</td>
-                        <td><span id="cpuTempValue" style="font-weight: 600;">35.0°C</span></td>
-                    </tr>
-                    <tr>
-                        <td>GPU 负载</td>
-                        <td><span id="gpuLoadValue" style="font-weight: 600;">0%</span></td>
-                    </tr>
-                    <tr>
-                        <td>内存使用</td>
-                        <td><span id="memoryUsageValue" style="font-weight: 600;">45%</span></td>
-                    </tr>
-                </table>
+                <div class="data-row">
+                    <span class="data-label">CPU 温度</span>
+                    <span class="data-value" id="cpuTempValue">35.0°C</span>
+                </div>
+                <div class="data-row">
+                    <span class="data-label">GPU 负载</span>
+                    <span class="data-value" id="gpuLoadValue">0%</span>
+                </div>
+                <div class="data-row">
+                    <span class="data-label">内存使用</span>
+                    <span class="data-value" id="memoryUsageValue">45%</span>
+                </div>
             </div>
             
             <!-- 位置信息 -->
@@ -559,43 +806,37 @@ MODERN_HTML = """<!DOCTYPE html>
                     <span class="card-title">当前位置</span>
                     <div class="card-icon blue">📍</div>
                 </div>
-                <table class="data-table">
-                    <tr>
-                        <td>坐标</td>
-                        <td><span id="positionValue" style="font-weight: 600;">(0.0, 0.0)</span></td>
-                    </tr>
-                    <tr>
-                        <td>当前航点</td>
-                        <td><span id="waypointValue" style="font-weight: 600;">WP001</span></td>
-                    </tr>
-                    <tr>
-                        <td>完成进度</td>
-                        <td>
-                            <span class="tag success" id="progressTag">0/5</span>
-                        </td>
-                    </tr>
-                </table>
+                <div class="data-row">
+                    <span class="data-label">坐标</span>
+                    <span class="data-value" id="positionValue">(0.0, 0.0)</span>
+                </div>
+                <div class="data-row">
+                    <span class="data-label">当前航点</span>
+                    <span class="data-value" id="waypointValue">WP001</span>
+                </div>
+                <div class="data-row">
+                    <span class="data-label">运行状态</span>
+                    <span class="data-value" id="statusValue">空闲</span>
+                </div>
             </div>
             
             <!-- 告警信息 -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-title">实时告警</span>
-                    <div class="card-icon red">⚠️</div>
+                    <span class="card-badge" id="alertCount">0</span>
                 </div>
                 <div class="alert-list" id="alertList">
-                    <div style="text-align: center; color: var(--text-secondary); padding: 40px;">
-                        暂无告警
-                    </div>
+                    <div class="alert-empty">暂无告警信息</div>
                 </div>
             </div>
         </section>
         
         <!-- 控制面板 -->
-        <section class="control-panel">
-            <div class="card-header">
-                <span class="card-title">运动控制</span>
-                <span style="color: var(--text-secondary); font-size: 14px;">WASD / 方向键控制</span>
+        <section class="control-section">
+            <div class="control-header">
+                <span class="control-title">运动控制</span>
+                <span class="control-hint">WASD / 方向键控制</span>
             </div>
             
             <div class="dpad">
@@ -614,13 +855,13 @@ MODERN_HTML = """<!DOCTYPE html>
             
             <div class="action-buttons">
                 <button class="action-btn primary" onclick="sendCmd('stand_up')">⬆ 起立/趴下</button>
-                <button class="action-btn danger" onclick="sendCmd('emergency_stop')">⏻ 紧急停止</button>
                 <button class="action-btn" onclick="sendCmd('home')">⌂ 回零</button>
+                <button class="action-btn danger" onclick="sendCmd('emergency_stop')">⏻ 紧急停止</button>
             </div>
         </section>
     </main>
     
-    <!-- 底部 -->
+    <!-- Footer -->
     <footer class="footer">
         <p>绝影Lite3 电力巡检系统 V1.7 · 广西电力职业技术学院</p>
     </footer>
@@ -666,7 +907,7 @@ MODERN_HTML = """<!DOCTYPE html>
                 // 电池
                 const battery = status.battery || 0;
                 document.getElementById('batteryPercent').textContent = battery + '%';
-                const circumference = 2 * Math.PI * 52;
+                const circumference = 2 * Math.PI * 60;
                 const offset = circumference - (battery / 100) * circumference;
                 const ring = document.getElementById('batteryRing');
                 ring.style.strokeDashoffset = offset;
@@ -676,7 +917,11 @@ MODERN_HTML = """<!DOCTYPE html>
                 document.getElementById('enduranceValue').textContent = (status.endurance_hours || 1.8).toFixed(1);
                 
                 // 系统状态
-                document.getElementById('cpuTempValue').textContent = (status.cpu_temp || 35).toFixed(1) + '°C';
+                const cpuTemp = status.cpu_temp || 35;
+                const cpuTempEl = document.getElementById('cpuTempValue');
+                cpuTempEl.textContent = cpuTemp.toFixed(1) + '°C';
+                cpuTempEl.className = 'data-value' + (cpuTemp >= 50 ? ' danger' : cpuTemp >= 45 ? ' warning' : '');
+                
                 document.getElementById('gpuLoadValue').textContent = (status.gpu_load || 0) + '%';
                 document.getElementById('memoryUsageValue').textContent = (status.memory_usage || 45) + '%';
                 
@@ -686,20 +931,21 @@ MODERN_HTML = """<!DOCTYPE html>
                     `(${pos.x.toFixed(1)}, ${pos.y.toFixed(1)})`;
                 document.getElementById('waypointValue').textContent = status.waypoint || 'WP001';
                 
+                // 状态
+                const statusEl = document.getElementById('statusValue');
+                const statusMap = {
+                    'idle': '空闲',
+                    'moving': '移动中',
+                    'inspecting': '巡检中',
+                    'standing': '起立中'
+                };
+                statusEl.textContent = statusMap[status.status] || '未知';
+                
                 // 进度
                 const completed = status.completed_waypoints || 0;
                 const total = status.total_waypoints || 5;
-                document.getElementById('progressTag').textContent = `${completed}/${total}`;
-                
-                // 状态标签
-                const statusTag = document.getElementById('progressTag');
-                if (status.status === 'moving') {
-                    statusTag.className = 'tag warning';
-                    statusTag.textContent = '巡检中';
-                } else {
-                    statusTag.className = 'tag success';
-                    statusTag.textContent = `${completed}/${total}`;
-                }
+                document.getElementById('progressText').textContent = `${completed} / ${total}`;
+                document.getElementById('progressFill').style.width = `${(completed/total)*100}%`;
             } else if (data.type === 'alert') {
                 addAlert(data.data);
             }
@@ -707,13 +953,20 @@ MODERN_HTML = """<!DOCTYPE html>
         
         function addAlert(alert) {
             const list = document.getElementById('alertList');
+            
+            // 清空空状态提示
+            const empty = list.querySelector('.alert-empty');
+            if (empty) empty.remove();
+            
             const item = document.createElement('div');
             item.className = `alert-item ${alert.level || ''}`;
             item.innerHTML = `
-                <span class="alert-dot ${alert.level || ''}"></span>
+                <div class="alert-indicator ${alert.level || ''}">
+                    ${alert.level === 'danger' ? '🔴' : '🟡'}
+                </div>
                 <div class="alert-content">
                     <div class="alert-message">${alert.message}</div>
-                    <div class="alert-time">${new Date(alert.timestamp).toLocaleTimeString()}</div>
+                    <div class="alert-time">${new Date(alert.timestamp).toLocaleTimeString('zh-CN')}</div>
                 </div>
             `;
             list.insertBefore(item, list.firstChild);
@@ -724,8 +977,7 @@ MODERN_HTML = """<!DOCTYPE html>
             }
             
             // 更新告警数量
-            const count = document.querySelectorAll('.alert-item').length;
-            document.getElementById('alertCount').textContent = count;
+            document.getElementById('alertCount').textContent = list.children.length;
         }
         
         function pressKey(key) {
@@ -740,13 +992,17 @@ MODERN_HTML = """<!DOCTYPE html>
             }
         }
         
-        // 键盘控制
+        // 键盘控制（完整实现）
         document.addEventListener('keydown', (e) => {
             const keyMap = {
-                'w': 'forward', 'ArrowUp': 'forward',
-                's': 'backward', 'ArrowDown': 'backward',
-                'a': 'left', 'ArrowLeft': 'left',
-                'd': 'right', 'ArrowRight': 'right',
+                'w': 'forward', 'W': 'forward',
+                's': 'backward', 'S': 'backward',
+                'a': 'left', 'A': 'left',
+                'd': 'right', 'D': 'right',
+                'ArrowUp': 'forward',
+                'ArrowDown': 'backward',
+                'ArrowLeft': 'left',
+                'ArrowRight': 'right',
                 ' ': 'stand_up',
                 'Escape': 'emergency_stop'
             };
@@ -754,8 +1010,13 @@ MODERN_HTML = """<!DOCTYPE html>
             const key = keyMap[e.key];
             if (key) {
                 e.preventDefault();
-                if (e.type === 'keydown') {
-                    pressKey(key);
+                pressKey(key);
+                
+                // 视觉反馈
+                const btn = document.querySelector(`.dpad-btn[data-key="${key}"]`);
+                if (btn) {
+                    btn.style.transform = 'scale(0.9)';
+                    setTimeout(() => btn.style.transform = '', 150);
                 }
             }
         });
@@ -766,12 +1027,12 @@ MODERN_HTML = """<!DOCTYPE html>
                 new Date().toLocaleTimeString('zh-CN');
         }
         
-        // 定时更新
+        // 定时更新状态
         setInterval(updateTime, 1000);
         setInterval(() => {
             fetch('/api/status').then(r => r.json()).then(d => {
                 document.getElementById('clientCount').textContent = d.clients;
-            });
+            }).catch(() => {});
         }, 2000);
         
         // 初始化
@@ -824,7 +1085,7 @@ def send_velocity_command():
 
 @app.get("/")
 async def root():
-    return HTMLResponse(MODERN_HTML)
+    return HTMLResponse(GHOST_HTML)
 
 
 @app.get("/api/status")
@@ -908,6 +1169,51 @@ class Monitor:
 
         elif msg_type == "system_status":
             robot_status.update(data.get("payload", {}))
+
+        # ========== 新增：键盘控制处理 ==========
+        elif msg_type == "key":
+            key = data.get("key", "")
+            action = data.get("action", "")
+            
+            key_mapping = {
+                "forward": ("forward", True),
+                "backward": ("backward", True),
+                "left": ("left", True),
+                "right": ("right", True),
+                "turn_left": ("turn_left", True),
+                "turn_right": ("turn_right", True),
+                "stand_up": ("stand", True),
+            }
+            
+            if key in key_mapping:
+                key_name, _ = key_mapping[key]
+                if action == "press":
+                    key_state[key_name] = True
+                    logger.info(f"按键按下: {key}")
+                elif action == "release":
+                    key_state[key_name] = False
+                    logger.info(f"按键释放: {key}")
+                
+                # 发送UDP控制指令
+                send_velocity_command()
+
+        # ========== 新增：命令处理 ==========
+        elif msg_type == "command":
+            cmd = data.get("command", "")
+            logger.info(f"收到命令: {cmd}")
+            
+            if cmd == "stand_up":
+                send_udp(CMD_STAND_UP)
+                robot_status["status"] = "standing"
+            elif cmd == "emergency_stop":
+                send_udp(CMD_EMERGENCY_STOP)
+                robot_status["status"] = "idle"
+                # 重置所有按键状态
+                for k in key_state:
+                    key_state[k] = False
+            elif cmd == "home":
+                send_udp(CMD_HOME)
+                robot_status["position"] = {"x": 0.0, "y": 0.0}
 
 
 monitor = Monitor()
