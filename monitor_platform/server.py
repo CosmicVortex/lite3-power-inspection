@@ -205,12 +205,66 @@ async def demo():
     return {"status": "ok"}
 
 class Monitor:
-    async def process(self, data: Dict, ws: WebSocket):
+    async def process(self, data: Dict, ws=None):
+        """处理来自感知主机的WebSocket消息
+        
+        Args:
+            data: 消息数据字典
+            ws: WebSocket连接（可为None，用于非WebSocket场景）
+        """
         p = data.get("payload", data.get("data", {}))
-        if data.get("type") == "system_status":
-            for k in ["battery","cpu_temp","gpu_load","memory_usage","status","waypoint","position","endurance_hours"]:
-                if k in p: robot_status[k] = p[k]
-            await ws.send_json({"type": "robot_status", "data": robot_status})
+        msg_type = data.get("type", "")
+        
+        try:
+            if msg_type == "system_status":
+                # 更新机器人状态
+                for k in ["battery","cpu_temp","gpu_load","memory_usage","status","waypoint","position","endurance_hours"]:
+                    if k in p:
+                        robot_status[k] = p[k]
+                # 广播状态给所有客户端
+                for conn in connections:
+                    try:
+                        if hasattr(conn, 'send_json'):
+                            await conn.send_json({"type": "robot_status", "data": robot_status})
+                    except:
+                        pass
+                        
+            elif msg_type == "inspection_result":
+                # 保存巡检记录
+                inspections.append({
+                    "ts": int(time.time() * 1000),
+                    "waypoint": p.get("waypoint_id", "WP001"),
+                    "defect_type": p.get("defect_type", "crack"),
+                    "confidence": p.get("confidence", 0.0),
+                    "measurements": p.get("measurements", {})
+                })
+                # 广播给所有客户端
+                for conn in connections:
+                    try:
+                        if hasattr(conn, 'send_json'):
+                            await conn.send_json({"type": "inspection", "data": inspections[-1]})
+                    except:
+                        pass
+                        
+            elif msg_type in ["crack_alert", "temperature_alert"]:
+                # 保存告警记录
+                alerts.append({
+                    "ts": int(time.time() * 1000),
+                    "type": msg_type,
+                    "level": p.get("level", "warning"),
+                    "value": p.get("value", 0),
+                    "waypoint": p.get("waypoint_id", "WP001")
+                })
+                # 广播告警
+                for conn in connections:
+                    try:
+                        if hasattr(conn, 'send_json'):
+                            await conn.send_json({"type": "alert", "data": alerts[-1]})
+                    except:
+                        pass
+                        
+        except Exception as e:
+            logger.error(f"处理消息失败: {e}")
 
 monitor = Monitor()
 
@@ -1163,24 +1217,28 @@ async def ws_server():
         connections.append(websocket)
         logger.info(f"感知主机连接: {websocket.remote_address}")
         
-        # 发送初始状态
-        await websocket.send_json({"type": "robot_status", "data": robot_status})
+        # 发送初始状态（websockets库格式）
+        import websockets
+        await websocket.send(json.dumps({"type": "robot_status", "data": robot_status}))
         
         try:
             async for message in websocket:
                 try:
                     data = json.loads(message)
+                    # 使用新的Monitor处理（传入websocket用于广播）
                     await monitor.process(data, websocket)
                 except json.JSONDecodeError:
                     logger.warning("收到非JSON消息")
                 except Exception as e:
                     logger.error(f"处理消息失败: {e}")
+        except websockets.exceptions.ConnectionClosed:
+            logger.info(f"感知主机断开: {websocket.remote_address}")
         except Exception as e:
             logger.error(f"WebSocket处理异常: {e}")
         finally:
             if websocket in connections:
                 connections.remove(websocket)
-            logger.info(f"感知主机断开: {websocket.remote_address}")
+            logger.info(f"感知主机已断开连接")
     
     async with websockets.serve(handler, "0.0.0.0", WS_PORT):
         logger.info(f"WebSocket服务器启动: ws://0.0.0.0:{WS_PORT}")
