@@ -1,5 +1,5 @@
 @echo off
-chcp 65001 >nul
+chcp 437 >nul
 setlocal enabledelayedexpansion
 
 echo.
