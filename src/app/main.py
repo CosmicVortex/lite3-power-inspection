@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-绝影Lite3电力巡检演示系统 - 增强版（混合模式）
+绝影Lite3电力巡检演示系统 - 增强版
 
 支持多种演示模式：
 1. simulation: AI识别模拟，本体数据真实
@@ -14,23 +14,20 @@
 - 视频流转发功能
 """
 
+import sys
+from pathlib import Path
+
+# 添加项目根目录到Python路径
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import argparse
 import asyncio
-import sys
-import time
-from pathlib import Path
 from loguru import logger
 from datetime import datetime
-
-# 添加项目根目录到路径
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.gateway.udp_controller import UDPMotionController
 from src.gateway.ptz_controller import PtzController
 from src.gateway.websocket_client import WebSocketGateway
-from src.perception.yolo_detector import YOLODetector
-from src.perception.unet_segmentor import UNetSegmentor
-from src.perception.temperature_monitor import TemperatureMonitor
 from src.services.simulation_generator import SimulationDataGenerator
 from src.services.real_body_data import RealBodyData
 from src.services.snapshot_server import SnapshotServer, start_snapshot_server
@@ -39,19 +36,13 @@ from src.services.video_stream_forwarder import forward_video_streams
 
 class DemoMode:
     """演示模式枚举"""
-    REAL = "real"           # 真实模式 - 使用真实模型和真实本体数据
-    SIMULATION = "simulation"  # 模拟模式 - AI识别模拟，本体数据真实
-    HYBRID = "hybrid"       # 混合模式 - 部分模拟
+    REAL = "real"           # 真实模式 - 使用真实模型
+    SIMULATION = "simulation"  # 模拟模式 - AI模拟，本体真实
+    HYBRID = "hybrid"       # 混合模式
 
 
 async def run_demo(mode: str = DemoMode.SIMULATION, config: dict = None, ws_url: str = None):
-    """运行演示模式
-    
-    Args:
-        mode: 演示模式 (real/simulation/hybrid)
-        config: 配置字典
-        ws_url: WebSocket服务器地址
-    """
+    """运行演示模式"""
     logger.info(f"启动演示模式: {mode}")
     logger.info(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info("=" * 60)
@@ -65,7 +56,7 @@ async def run_demo(mode: str = DemoMode.SIMULATION, config: dict = None, ws_url:
     udp_controller = UDPMotionController()
     ptz_controller = PtzController()
     
-    # WebSocket地址：优先使用命令行参数，其次配置文件
+    # WebSocket地址
     if ws_url:
         websocket = WebSocketGateway(server_url=ws_url)
         logger.info(f"使用指定WebSocket地址: {ws_url}")
@@ -75,7 +66,7 @@ async def run_demo(mode: str = DemoMode.SIMULATION, config: dict = None, ws_url:
     # AI数据生成器
     generator = SimulationDataGenerator(mode=mode)
     
-    # 真实本体数据生成器（始终使用物理模型）
+    # 真实本体数据生成器
     body_data = RealBodyData()
     
     # 启动快照服务
@@ -153,7 +144,6 @@ async def _demo_stand_up(controller: UDPMotionController, body_data: RealBodyDat
     controller.stand_up()
     body_data.status = "stand"
     
-    # 发送状态更新
     status = body_data.get_system_status()
     await asyncio.sleep(3)
     
@@ -175,14 +165,10 @@ async def _demo_crack_detection(generator, websocket, snapshot_server, body_data
     """演示：裂缝检测"""
     logger.info("▶ 演示：裂缝检测")
     
-    # 生成模拟数据
     data = generator.generate_crack_detection("WP001")
-    
-    # 更新本体状态（模拟检测到目标时的位置）
     body_data.waypoint = "WP001"
     body_data.update_position(0.1, 0.0, 0.0)
     
-    # 上报数据
     await websocket.send_message(data["type"], data["payload"])
     
     logger.info(f"✓ 裂缝检测完成: {data['payload']['measurements']['width_mm']}mm")
@@ -194,17 +180,14 @@ async def _demo_temperature_monitor(generator, websocket, body_data: RealBodyDat
     """演示：温度监测"""
     logger.info("▶ 演示：温度监测")
     
-    # 更新航点位置
     body_data.waypoint = "WP004"
     body_data.update_position(0.0, 0.1, 0.0)
     
-    # 模拟温度上升
     base_temp = 40.0
     for i in range(5):
-        temp = base_temp + i * 2.0  # 逐渐升温
+        temp = base_temp + i * 2.0
         alert_level = "warning" if temp >= 45 else ("critical" if temp >= 50 else "normal")
         
-        # 更新本体温度（基于物理模型）
         body_data.cpu_temp = temp
         
         data = generator.generate_temperature_alert("WP004")
@@ -225,7 +208,6 @@ async def _demo_move_forward(controller: UDPMotionController, body_data: RealBod
     controller.set_velocity(0.3, 0.0, 0.0)
     body_data.status = "moving"
     
-    # 模拟移动过程
     for i in range(5):
         body_data.update_position(0.1, 0.0, 0.0)
         body_data.update_joints("walking_forward")
@@ -243,7 +225,6 @@ async def _demo_return(controller: UDPMotionController, body_data: RealBodyData)
     controller.set_velocity(-0.3, 0.0, 0.0)
     body_data.status = "moving"
     
-    # 模拟返回过程
     for i in range(5):
         body_data.update_position(-0.1, 0.0, 0.0)
         body_data.update_joints("walking_backward")
@@ -276,8 +257,6 @@ async def _cleanup(udp_controller, ptz_controller, websocket, snapshot_server=No
 
 def main():
     """主函数"""
-    import argparse
-    
     parser = argparse.ArgumentParser(description="绝影Lite3电力巡检演示")
     parser.add_argument(
         "--mode",
