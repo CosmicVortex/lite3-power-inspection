@@ -120,6 +120,11 @@ async def main():
         action="store_true",
         help="启动前运行环境诊断"
     )
+    parser.add_argument(
+        "--ws-url",
+        default=None,
+        help="WebSocket服务器地址（覆盖配置文件）"
+    )
     
     args = parser.parse_args()
     
@@ -164,7 +169,8 @@ async def main():
     
     # 运行演示
     from src.app.main import run_demo
-    await run_demo(mode=demo_mode)
+    ws_url = args.ws_url if args.ws_url else None
+    await run_demo(mode=demo_mode, ws_url=ws_url)
 
 
 if __name__ == "__main__":

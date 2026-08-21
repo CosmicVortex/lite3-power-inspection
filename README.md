@@ -114,11 +114,20 @@ unzip -q ~/lite3-power-inspection.zip
 # 3. 一键离线安装依赖
 ./scripts/offline_install.sh all
 
-# 4. 启动巡检程序
+# 4. 配置WebSocket地址（重要！）
+# 方式一：编辑配置文件
+sed -i 's|ws://MONITOR_HOST:8765/ws|ws://<笔记本IP>:8765/ws|' config/inspection_config.yaml
+
+# 方式二：命令行参数覆盖
+python3 scripts/run_demo.py --mode simulation --ws-url ws://<笔记本IP>:8765/ws
+
+# 5. 启动巡检程序
 python3 scripts/run_demo.py --mode simulation
 ```
 
-> **注意**: offline-deploy目录包含所有Python依赖的wheel包，可完全离线安装。
+> **注意**: 
+> - offline-deploy目录包含所有Python依赖的wheel包，可完全离线安装
+> - 必须将WebSocket地址配置为监测平台实际IP地址
 
 #### 监测平台部署（笔记本）
 

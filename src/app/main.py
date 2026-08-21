@@ -37,7 +37,7 @@ class DemoMode:
     HYBRID = "hybrid"       # 混合模式 - 部分模拟
 
 
-async def run_demo(mode: str = DemoMode.SIMULATION, config: dict = None):
+async def run_demo(mode: str = DemoMode.SIMULATION, config: dict = None, ws_url: str = None):
     """运行演示模式
     
     Args:
@@ -50,7 +50,12 @@ async def run_demo(mode: str = DemoMode.SIMULATION, config: dict = None):
     # 初始化组件
     udp_controller = UDPMotionController()
     ptz_controller = PtzController()
-    websocket = WebSocketGateway()
+    # WebSocket地址：优先使用命令行参数，其次配置文件
+    if ws_url:
+        websocket = WebSocketGateway(server_url=ws_url)
+        logger.info(f"使用指定WebSocket地址: {ws_url}")
+    else:
+        websocket = WebSocketGateway()
     generator = SimulationDataGenerator(mode=mode)
     
     # 启动快照服务
