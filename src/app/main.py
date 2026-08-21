@@ -83,7 +83,7 @@ async def run_demo(mode: str = DemoMode.SIMULATION, config: dict = None, ws_url:
     
     # 启动视频流转发（后台任务）
     video_task = asyncio.create_task(
-        forward_video_streams(ws_url or "ws://192.168.1.103:8765/ws")
+        forward_video_streams(ws_url or "ws://MONITOR_HOST:8765/ws")
     )
     
     # 启动UDP数据接收和心跳任务

@@ -14,10 +14,10 @@ def create_portable_package(output_dir: str = "deliverables"):
     
     # Files to include
     files_to_include = [
-        ("monitor_platform/server.py", "monitor_platform/server.py"),
-        ("monitor_platform/__init__.py", "monitor_platform/__init__.py"),
-        ("monitor_platform/requirements.txt", "monitor_platform/requirements.txt"),
-        ("scripts/start_monitor.py", "scripts/start_monitor.py"),
+        ("monitor_platform/server.py", "server.py"),
+        ("monitor_platform/__init__.py", "__init__.py"),
+        ("monitor_platform/requirements.txt", "requirements.txt"),
+        ("scripts/start_monitor.py", "start_monitor.py"),
         ("scripts/start_monitor.sh", "start_monitor.sh"),
         ("scripts/start_monitor.bat", "start_monitor.bat"),
     ]
