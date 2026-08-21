@@ -107,44 +107,49 @@ pip install fastapi uvicorn websockets pydantic loguru
 ssh ysc@192.168.1.103
 # 密码: '（英文单引号）
 
-# 2. 解压部署包
+# 2. 解压部署包（包含offline-deploy离线依赖）
 cd ~ && mkdir -p lite3-power-inspection && cd lite3-power-inspection
 unzip -q ~/lite3-power-inspection.zip
 
-# 3. 安装依赖（无网络时使用离线包）
-./scripts/deploy_oneclick.sh --offline-dir ./offline-deploy
-# 或手动安装：
-pip install loguru numpy opencv-python requests pyyaml websockets
+# 3. 一键离线安装依赖
+./scripts/offline_install.sh all
 
 # 4. 启动巡检程序
 python3 scripts/run_demo.py --mode simulation
 ```
+
+> **注意**: offline-deploy目录包含所有Python依赖的wheel包，可完全离线安装。
 
 #### 监测平台部署（笔记本）
 
 > **方式一：使用一键启动脚本（推荐）**
 
 ```bash
-# Linux/macOS - 直接运行启动脚本
+# Linux/macOS - 直接运行启动脚本（自动创建venv并安装依赖）
 ./scripts/start_monitor.sh
 
 # Windows - 双击运行或在CMD中执行
 start_monitor.bat
 ```
 
-> **方式二：手动部署**
+> **方式二：使用离线包安装**
 
 ```bash
-# 1. 进入monitor_platform目录
-cd monitor_platform
+# 1. 安装离线依赖（无网络时使用）
+./scripts/offline_install.sh monitor
 
-# 2. 创建虚拟环境并安装依赖
+# 2. 启动监测平台
+./scripts/start_monitor.sh
+```
+
+> **方式三：手动部署（有网络时）**
+
+```bash
+cd monitor_platform
 python3 -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-
-# 3. 启动服务
-python server.py
+python3 server.py
 ```
 
 **访问地址**: http://localhost:8000

@@ -54,3 +54,7 @@ Thumbs.db
 *.tmp
 *.log
 _files/
+
+# Python虚拟环境
+venv/
+.env
