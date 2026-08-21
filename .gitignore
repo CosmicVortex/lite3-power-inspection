@@ -58,3 +58,7 @@ _files/
 # Python虚拟环境
 venv/
 .env
+
+# 部署包（大文件，不入库）
+deliverables/*.zip
+deliverables/*.tar.gz
