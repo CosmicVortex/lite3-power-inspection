@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-绝影Lite3 监测平台 - Ghost CMS风格界面
-基于Ghost Admin设计系统：左侧导航栏 + 顶部Header + 卡片布局
+绝影Lite3 监测平台 - Ghost CMS Admin风格界面
+包含：登录界面 + 左侧导航栏 + 顶部Header + 卡片布局
 """
 
 import asyncio, json, time, logging, struct, socket, base64
@@ -43,7 +43,7 @@ motion_sock = None
 key_state = {"forward": False, "backward": False, "left": False, "right": False,
              "turn_left": False, "turn_right": False, "stand": False}
 
-# ========== Ghost CMS风格HTML ==========
+# ========== Ghost CMS Admin风格HTML ==========
 GHOST_ADMIN_HTML = """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -53,7 +53,6 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
     <style>
         /* ========== Ghost Design System ========== */
         :root {
-            /* Ghost品牌色 */
             --ghost-black: #15171A;
             --ghost-dark: #222429;
             --ghost-sidebar: #1A1C23;
@@ -63,14 +62,12 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             --ghost-palest: #F1F3F5;
             --ghost-white: #FFFFFF;
             
-            /* 主题色 */
             --primary: #FF6B35;
             --primary-hover: #E55A28;
             --success: #00C853;
             --warning: #FFB300;
             --danger: #FF3D00;
             
-            /* 间距 */
             --space-xs: 4px;
             --space-sm: 8px;
             --space-md: 16px;
@@ -78,12 +75,10 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             --space-xl: 32px;
             --space-2xl: 48px;
             
-            /* 圆角 */
             --radius-sm: 4px;
             --radius-md: 8px;
             --radius-lg: 12px;
             
-            /* 阴影 */
             --shadow-sm: 0 1px 3px rgba(0,0,0,0.12);
             --shadow-md: 0 4px 6px rgba(0,0,0,0.1);
         }
@@ -95,10 +90,128 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             background: var(--ghost-palest);
             color: var(--ghost-dark);
             min-height: 100vh;
+        }
+        
+        /* ========== 登录界面 ========== */
+        .login-page {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--ghost-black) 0%, var(--ghost-dark) 100%);
+        }
+        
+        .login-container {
+            width: 100%;
+            max-width: 400px;
+            padding: var(--space-xl);
+        }
+        
+        .login-logo {
+            text-align: center;
+            margin-bottom: var(--space-2xl);
+        }
+        
+        .login-logo-icon {
+            width: 64px;
+            height: 64px;
+            background: var(--primary);
+            border-radius: var(--radius-lg);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            margin-bottom: var(--space-lg);
+        }
+        
+        .login-logo h1 {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--ghost-white);
+            margin-bottom: var(--space-sm);
+        }
+        
+        .login-logo p {
+            font-size: 14px;
+            color: var(--ghost-light);
+        }
+        
+        .login-card {
+            background: var(--ghost-white);
+            border-radius: var(--radius-lg);
+            padding: var(--space-2xl);
+            box-shadow: var(--shadow-md);
+        }
+        
+        .login-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--ghost-black);
+            margin-bottom: var(--space-lg);
+        }
+        
+        .form-group {
+            margin-bottom: var(--space-lg);
+        }
+        
+        .form-label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--ghost-mid);
+            margin-bottom: var(--space-sm);
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: var(--space-md);
+            border: 1px solid var(--ghost-pale);
+            border-radius: var(--radius-md);
+            font-size: 15px;
+            transition: all 0.15s ease;
+            outline: none;
+        }
+        
+        .form-input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.1);
+        }
+        
+        .btn-login {
+            width: 100%;
+            padding: var(--space-md);
+            background: var(--primary);
+            border: none;
+            border-radius: var(--radius-md);
+            color: white;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        
+        .btn-login:hover {
+            background: var(--primary-hover);
+        }
+        
+        .login-footer {
+            text-align: center;
+            margin-top: var(--space-xl);
+            font-size: 13px;
+            color: var(--ghost-light);
+        }
+        
+        /* ========== 主界面 ========== */
+        .app-container {
+            display: none;
+            min-height: 100vh;
+        }
+        
+        .app-container.visible {
             display: flex;
         }
         
-        /* ========== 左侧导航栏（Ghost风格）========== */
+        /* 左侧导航栏 */
         .sidebar {
             width: 240px;
             background: var(--ghost-sidebar);
@@ -138,7 +251,6 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
         .sidebar-logo-text {
             font-size: 16px;
             font-weight: 600;
-            letter-spacing: -0.3px;
         }
         
         .sidebar-nav {
@@ -187,7 +299,6 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
         .nav-item-icon {
             width: 20px;
             text-align: center;
-            font-size: 16px;
         }
         
         .nav-item-badge {
@@ -200,7 +311,50 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             font-weight: 600;
         }
         
-        /* ========== 主内容区 ========== */
+        .sidebar-footer {
+            padding: var(--space-md) var(--space-xl);
+            border-top: 1px solid rgba(255,255,255,0.08);
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: var(--space-md);
+        }
+        
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            background: var(--primary);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        
+        .user-name {
+            flex: 1;
+            font-size: 13px;
+            color: var(--ghost-white);
+        }
+        
+        .btn-logout {
+            background: none;
+            border: none;
+            color: var(--ghost-light);
+            cursor: pointer;
+            font-size: 13px;
+            padding: var(--space-sm);
+        }
+        
+        .btn-logout:hover {
+            color: var(--ghost-white);
+        }
+        
+        /* 主内容区 */
         .main-wrapper {
             flex: 1;
             margin-left: 240px;
@@ -209,7 +363,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             min-height: 100vh;
         }
         
-        /* ========== 顶部Header ========== */
+        /* 顶部Header */
         .header {
             height: 60px;
             background: var(--ghost-white);
@@ -274,11 +428,6 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             color: white;
         }
         
-        .header-btn.primary:hover {
-            background: var(--primary-hover);
-            border-color: var(--primary-hover);
-        }
-        
         .connection-status {
             display: flex;
             align-items: center;
@@ -303,7 +452,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             50% { opacity: 0.4; }
         }
         
-        /* ========== 内容区域 ========== */
+        /* 内容区域 */
         .content {
             flex: 1;
             padding: var(--space-xl);
@@ -318,7 +467,6 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             font-size: 24px;
             font-weight: 700;
             color: var(--ghost-black);
-            letter-spacing: -0.5px;
             margin-bottom: var(--space-sm);
         }
         
@@ -327,7 +475,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             color: var(--ghost-light);
         }
         
-        /* ========== 卡片网格 ========== */
+        /* 卡片网格 */
         .cards-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -383,7 +531,34 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             padding: var(--space-lg);
         }
         
-        /* ========== 电池环形 ========== */
+        /* 数据行 */
+        .data-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: var(--space-md) 0;
+            border-bottom: 1px solid var(--ghost-palest);
+        }
+        
+        .data-row:last-child {
+            border-bottom: none;
+        }
+        
+        .data-label {
+            font-size: 13px;
+            color: var(--ghost-light);
+        }
+        
+        .data-value {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--ghost-black);
+        }
+        
+        .data-value.warning { color: var(--warning); }
+        .data-value.danger { color: var(--danger); }
+        
+        /* 电池环形 */
         .battery-container {
             display: flex;
             flex-direction: column;
@@ -436,34 +611,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             margin-top: var(--space-xs);
         }
         
-        /* ========== 数据行 ========== */
-        .data-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: var(--space-md) 0;
-            border-bottom: 1px solid var(--ghost-palest);
-        }
-        
-        .data-row:last-child {
-            border-bottom: none;
-        }
-        
-        .data-label {
-            font-size: 13px;
-            color: var(--ghost-light);
-        }
-        
-        .data-value {
-            font-size: 18px;
-            font-weight: 600;
-            color: var(--ghost-black);
-        }
-        
-        .data-value.warning { color: var(--warning); }
-        .data-value.danger { color: var(--danger); }
-        
-        /* ========== D-Pad控制器 ========== */
+        /* D-Pad控制器 */
         .dpad {
             display: grid;
             grid-template-columns: repeat(3, 56px);
@@ -539,7 +687,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             color: white;
         }
         
-        /* ========== 告警列表 ========== */
+        /* 告警列表 */
         .alert-list {
             max-height: 280px;
             overflow-y: auto;
@@ -601,7 +749,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             margin-top: 2px;
         }
         
-        /* ========== 进度条 ========== */
+        /* 进度条 */
         .progress-bar {
             height: 4px;
             background: var(--ghost-palest);
@@ -617,7 +765,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             transition: width 0.5s ease;
         }
         
-        /* ========== 空状态 ========== */
+        /* 空状态 */
         .empty-state {
             text-align: center;
             padding: var(--space-2xl);
@@ -625,29 +773,18 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             font-size: 13px;
         }
         
-        /* ========== 响应式 ========== */
+        /* 响应式 */
         @media (max-width: 1024px) {
             .sidebar {
                 width: 60px;
             }
-            
-            .sidebar-logo-text,
-            .nav-item-text,
-            .nav-section-title,
-            .nav-item-badge {
+            .sidebar-logo-text, .nav-item-text, .nav-section-title, .nav-item-badge {
                 display: none;
             }
-            
             .nav-item {
                 justify-content: center;
                 padding: var(--space-md);
             }
-            
-            .nav-item.active {
-                padding-left: var(--space-md);
-                border-left-width: 3px;
-            }
-            
             .main-wrapper {
                 margin-left: 60px;
             }
@@ -657,11 +794,9 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             .sidebar {
                 display: none;
             }
-            
             .main-wrapper {
                 margin-left: 0;
             }
-            
             .cards-grid {
                 grid-template-columns: 1fr;
             }
@@ -669,223 +804,284 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
     </style>
 </head>
 <body>
-    <!-- 左侧导航栏 -->
-    <aside class="sidebar">
-        <div class="sidebar-logo">
-            <a href="/">
-                <div class="sidebar-logo-icon">🤖</div>
-                <span class="sidebar-logo-text">绝影Lite3</span>
-            </a>
-        </div>
-        
-        <nav class="sidebar-nav">
-            <div class="nav-section">
-                <div class="nav-section-title">监控中心</div>
-                <a class="nav-item active" href="#">
-                    <span class="nav-item-icon">📊</span>
-                    <span class="nav-item-text">实时监控</span>
-                </a>
-                <a class="nav-item" href="#">
-                    <span class="nav-item-icon">🌡️</span>
-                    <span class="nav-item-text">温度监测</span>
-                </a>
-                <a class="nav-item" href="#">
-                    <span class="nav-item-icon">🔍</span>
-                    <span class="nav-item-text">裂缝检测</span>
-                </a>
+    <!-- 登录界面 -->
+    <div class="login-page" id="loginPage">
+        <div class="login-container">
+            <div class="login-logo">
+                <div class="login-logo-icon">🤖</div>
+                <h1>绝影Lite3</h1>
+                <p>电力巡检监控中心</p>
             </div>
             
-            <div class="nav-section">
-                <div class="nav-section-title">控制</div>
-                <a class="nav-item" href="#">
-                    <span class="nav-item-icon">🎮</span>
-                    <span class="nav-item-text">设备控制</span>
-                </a>
-                <a class="nav-item" href="#">
-                    <span class="nav-item-icon">📹</span>
-                    <span class="nav-item-text">视频流</span>
-                </a>
-            </div>
-            
-            <div class="nav-section">
-                <div class="nav-section-title">历史</div>
-                <a class="nav-item" href="#">
-                    <span class="nav-item-icon">📈</span>
-                    <span class="nav-item-text">巡检记录</span>
-                </a>
-                <a class="nav-item" href="#">
-                    <span class="nav-item-icon">⚠️</span>
-                    <span class="nav-item-text">告警历史</span>
-                    <span class="nav-item-badge" id="alertBadge">0</span>
-                </a>
-            </div>
-        </nav>
-    </aside>
-    
-    <!-- 主内容区 -->
-    <div class="main-wrapper">
-        <!-- 顶部Header -->
-        <header class="header">
-            <div class="header-left">
-                <div class="breadcrumb">
-                    <span>监控中心</span>
-                    <span class="breadcrumb-separator">/</span>
-                    <span class="breadcrumb-current">实时监控</span>
-                </div>
-            </div>
-            
-            <div class="header-right">
-                <div class="connection-status">
-                    <span class="status-dot"></span>
-                    <span id="connectionStatus">已连接</span>
-                </div>
-                <span style="font-size: 13px; color: var(--ghost-light);" id="currentTime"></span>
-                <button class="header-btn" onclick="fetchDemo()">演示模式</button>
-                <button class="header-btn primary" onclick="sendCmd('stand_up')">起立/趴下</button>
-            </div>
-        </header>
-        
-        <!-- 内容区域 -->
-        <main class="content">
-            <div class="page-header">
-                <h1 class="page-title">实时监控</h1>
-                <p class="page-subtitle">绝影Lite3专业版 · 智能电力巡检系统</p>
-            </div>
-            
-            <!-- 巡检进度 -->
-            <div style="background: var(--ghost-white); border-radius: var(--radius-lg); border: 1px solid var(--ghost-pale); padding: var(--space-lg); margin-bottom: var(--space-xl);">
-                <div style="display: flex; justify-content: space-between; margin-bottom: var(--space-sm);">
-                    <span style="font-size: 13px; color: var(--ghost-light);">巡检进度</span>
-                    <span style="font-size: 13px; color: var(--ghost-dark); font-weight: 500;" id="progressText">0 / 5</span>
-                </div>
-                <div class="progress-bar">
-                    <div class="progress-fill" id="progressFill" style="width: 0%;"></div>
-                </div>
-            </div>
-            
-            <!-- 数据卡片 -->
-            <div class="cards-grid">
-                <!-- 电池状态 -->
-                <div class="card">
-                    <div class="card-header">
-                        <span class="card-title">电池状态</span>
-                        <div class="card-icon orange">🔋</div>
+            <div class="login-card">
+                <h2 class="login-title">登录系统</h2>
+                <form onsubmit="handleLogin(event)">
+                    <div class="form-group">
+                        <label class="form-label">用户名</label>
+                        <input type="text" class="form-input" id="username" placeholder="请输入用户名" value="admin">
                     </div>
-                    <div class="card-body">
-                        <div class="battery-container">
-                            <div class="battery-ring">
-                                <svg width="120" height="120" viewBox="0 0 120 120">
-                                    <circle class="battery-ring-bg" cx="60" cy="60" r="52"/>
-                                    <circle class="battery-ring-fill" id="batteryRing" cx="60" cy="60" r="52"
-                                            stroke-dasharray="326.7" stroke-dashoffset="100"/>
-                                </svg>
-                                <div class="battery-center">
-                                    <div class="battery-percent" id="batteryPercent">68%</div>
-                                    <div class="battery-label">电量</div>
+                    <div class="form-group">
+                        <label class="form-label">密码</label>
+                        <input type="password" class="form-input" id="password" placeholder="请输入密码" value="admin">
+                    </div>
+                    <button type="submit" class="btn-login">登录</button>
+                </form>
+            </div>
+            
+            <div class="login-footer">
+                <p>绝影Lite3 电力巡检系统 V1.9 · 广西电力职业技术学院</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 主应用界面 -->
+    <div class="app-container" id="appContainer">
+        <!-- 左侧导航栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-logo">
+                <a href="#">
+                    <div class="sidebar-logo-icon">🤖</div>
+                    <span class="sidebar-logo-text">绝影Lite3</span>
+                </a>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <div class="nav-section-title">监控中心</div>
+                    <a class="nav-item active" href="#">
+                        <span class="nav-item-icon">📊</span>
+                        <span class="nav-item-text">实时监控</span>
+                    </a>
+                    <a class="nav-item" href="#">
+                        <span class="nav-item-icon">🌡️</span>
+                        <span class="nav-item-text">温度监测</span>
+                    </a>
+                    <a class="nav-item" href="#">
+                        <span class="nav-item-icon">🔍</span>
+                        <span class="nav-item-text">裂缝检测</span>
+                    </a>
+                </div>
+                
+                <div class="nav-section">
+                    <div class="nav-section-title">控制</div>
+                    <a class="nav-item" href="#">
+                        <span class="nav-item-icon">🎮</span>
+                        <span class="nav-item-text">设备控制</span>
+                    </a>
+                    <a class="nav-item" href="#">
+                        <span class="nav-item-icon">📹</span>
+                        <span class="nav-item-text">视频流</span>
+                    </a>
+                </div>
+                
+                <div class="nav-section">
+                    <div class="nav-section-title">历史</div>
+                    <a class="nav-item" href="#">
+                        <span class="nav-item-icon">📈</span>
+                        <span class="nav-item-text">巡检记录</span>
+                    </a>
+                    <a class="nav-item" href="#">
+                        <span class="nav-item-icon">⚠️</span>
+                        <span class="nav-item-text">告警历史</span>
+                        <span class="nav-item-badge" id="alertBadge">0</span>
+                    </a>
+                </div>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <div class="user-avatar">A</div>
+                    <span class="user-name">Admin</span>
+                    <button class="btn-logout" onclick="handleLogout()">退出</button>
+                </div>
+            </div>
+        </aside>
+        
+        <!-- 主内容区 -->
+        <div class="main-wrapper">
+            <!-- 顶部Header -->
+            <header class="header">
+                <div class="header-left">
+                    <div class="breadcrumb">
+                        <span>监控中心</span>
+                        <span class="breadcrumb-separator">/</span>
+                        <span class="breadcrumb-current">实时监控</span>
+                    </div>
+                </div>
+                
+                <div class="header-right">
+                    <div class="connection-status">
+                        <span class="status-dot"></span>
+                        <span id="connectionStatus">已连接</span>
+                    </div>
+                    <span style="font-size: 13px; color: var(--ghost-light);" id="currentTime"></span>
+                    <button class="header-btn" onclick="fetchDemo()">演示模式</button>
+                    <button class="header-btn primary" onclick="sendCmd('stand_up')">起立/趴下</button>
+                </div>
+            </header>
+            
+            <!-- 内容区域 -->
+            <main class="content">
+                <div class="page-header">
+                    <h1 class="page-title">实时监控</h1>
+                    <p class="page-subtitle">绝影Lite3专业版 · 智能电力巡检系统</p>
+                </div>
+                
+                <!-- 巡检进度 -->
+                <div style="background: var(--ghost-white); border-radius: var(--radius-lg); border: 1px solid var(--ghost-pale); padding: var(--space-lg); margin-bottom: var(--space-xl);">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: var(--space-sm);">
+                        <span style="font-size: 13px; color: var(--ghost-light);">巡检进度</span>
+                        <span style="font-size: 13px; color: var(--ghost-dark); font-weight: 500;" id="progressText">0 / 5</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill" style="width: 0%;"></div>
+                    </div>
+                </div>
+                
+                <!-- 数据卡片 -->
+                <div class="cards-grid">
+                    <!-- 电池状态 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-title">电池状态</span>
+                            <div class="card-icon orange">🔋</div>
+                        </div>
+                        <div class="card-body">
+                            <div class="battery-container">
+                                <div class="battery-ring">
+                                    <svg width="120" height="120" viewBox="0 0 120 120">
+                                        <circle class="battery-ring-bg" cx="60" cy="60" r="52"/>
+                                        <circle class="battery-ring-fill" id="batteryRing" cx="60" cy="60" r="52"
+                                                stroke-dasharray="326.7" stroke-dashoffset="100"/>
+                                    </svg>
+                                    <div class="battery-center">
+                                        <div class="battery-percent" id="batteryPercent">68%</div>
+                                        <div class="battery-label">电量</div>
+                                    </div>
+                                </div>
+                                <div style="text-align: center;">
+                                    <span style="font-size: 13px; color: var(--ghost-light);">预估续航</span>
+                                    <strong style="font-size: 18px; color: var(--ghost-black); margin-left: var(--space-sm);" id="enduranceValue">1.8</strong>
+                                    <span style="font-size: 13px; color: var(--ghost-light);">小时</span>
                                 </div>
                             </div>
-                            <div style="text-align: center;">
-                                <span style="font-size: 13px; color: var(--ghost-light);">预估续航</span>
-                                <strong style="font-size: 18px; color: var(--ghost-black); margin-left: var(--space-sm);" id="enduranceValue">1.8</strong>
-                                <span style="font-size: 13px; color: var(--ghost-light);">小时</span>
+                        </div>
+                    </div>
+                    
+                    <!-- 系统状态 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-title">系统状态</span>
+                            <div class="card-icon green">📊</div>
+                        </div>
+                        <div class="card-body" style="padding: 0;">
+                            <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
+                                <span class="data-label">CPU 温度</span>
+                                <span class="data-value" id="cpuTempValue">35.0°C</span>
+                            </div>
+                            <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
+                                <span class="data-label">GPU 负载</span>
+                                <span class="data-value" id="gpuLoadValue">0%</span>
+                            </div>
+                            <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
+                                <span class="data-label">内存使用</span>
+                                <span class="data-value" id="memoryUsageValue">45%</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 位置信息 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-title">当前位置</span>
+                            <div class="card-icon blue">📍</div>
+                        </div>
+                        <div class="card-body" style="padding: 0;">
+                            <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
+                                <span class="data-label">坐标</span>
+                                <span class="data-value" id="positionValue">(0.0, 0.0)</span>
+                            </div>
+                            <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
+                                <span class="data-label">当前航点</span>
+                                <span class="data-value" id="waypointValue">WP001</span>
+                            </div>
+                            <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
+                                <span class="data-label">运行状态</span>
+                                <span class="data-value" id="statusValue">空闲</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 告警信息 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-title">实时告警</span>
+                            <span style="font-size: 12px; color: var(--ghost-light);" id="alertCount">0</span>
+                        </div>
+                        <div class="card-body" style="padding: var(--space-md);">
+                            <div class="alert-list" id="alertList">
+                                <div class="empty-state">暂无告警信息</div>
                             </div>
                         </div>
                     </div>
                 </div>
                 
-                <!-- 系统状态 -->
+                <!-- 控制面板 -->
                 <div class="card">
                     <div class="card-header">
-                        <span class="card-title">系统状态</span>
-                        <div class="card-icon green">📊</div>
+                        <span class="card-title">运动控制</span>
+                        <span style="font-size: 12px; color: var(--ghost-light);">WASD / 方向键控制</span>
                     </div>
-                    <div class="card-body" style="padding: 0;">
-                        <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
-                            <span class="data-label">CPU 温度</span>
-                            <span class="data-value" id="cpuTempValue">35.0°C</span>
+                    <div class="card-body">
+                        <div class="dpad">
+                            <div class="dpad-btn empty"></div>
+                            <div class="dpad-btn" data-key="forward" onclick="pressKey('forward')">↑</div>
+                            <div class="dpad-btn empty"></div>
+                            
+                            <div class="dpad-btn" data-key="left" onclick="pressKey('left')">←</div>
+                            <div class="dpad-btn empty"></div>
+                            <div class="dpad-btn" data-key="right" onclick="pressKey('right')">→</div>
+                            
+                            <div class="dpad-btn empty"></div>
+                            <div class="dpad-btn" data-key="backward" onclick="pressKey('backward')">↓</div>
+                            <div class="dpad-btn empty"></div>
                         </div>
-                        <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
-                            <span class="data-label">GPU 负载</span>
-                            <span class="data-value" id="gpuLoadValue">0%</span>
-                        </div>
-                        <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
-                            <span class="data-label">内存使用</span>
-                            <span class="data-value" id="memoryUsageValue">45%</span>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- 位置信息 -->
-                <div class="card">
-                    <div class="card-header">
-                        <span class="card-title">当前位置</span>
-                        <div class="card-icon blue">📍</div>
-                    </div>
-                    <div class="card-body" style="padding: 0;">
-                        <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
-                            <span class="data-label">坐标</span>
-                            <span class="data-value" id="positionValue">(0.0, 0.0)</span>
-                        </div>
-                        <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
-                            <span class="data-label">当前航点</span>
-                            <span class="data-value" id="waypointValue">WP001</span>
-                        </div>
-                        <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
-                            <span class="data-label">运行状态</span>
-                            <span class="data-value" id="statusValue">空闲</span>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- 告警信息 -->
-                <div class="card">
-                    <div class="card-header">
-                        <span class="card-title">实时告警</span>
-                        <span style="font-size: 12px; color: var(--ghost-light);" id="alertCount">0</span>
-                    </div>
-                    <div class="card-body" style="padding: var(--space-md);">
-                        <div class="alert-list" id="alertList">
-                            <div class="empty-state">暂无告警信息</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- 控制面板 -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">运动控制</span>
-                    <span style="font-size: 12px; color: var(--ghost-light);">WASD / 方向键控制</span>
-                </div>
-                <div class="card-body">
-                    <div class="dpad">
-                        <div class="dpad-btn empty"></div>
-                        <div class="dpad-btn" data-key="forward" onclick="pressKey('forward')">↑</div>
-                        <div class="dpad-btn empty"></div>
                         
-                        <div class="dpad-btn" data-key="left" onclick="pressKey('left')">←</div>
-                        <div class="dpad-btn empty"></div>
-                        <div class="dpad-btn" data-key="right" onclick="pressKey('right')">→</div>
-                        
-                        <div class="dpad-btn empty"></div>
-                        <div class="dpad-btn" data-key="backward" onclick="pressKey('backward')">↓</div>
-                        <div class="dpad-btn empty"></div>
-                    </div>
-                    
-                    <div class="action-buttons">
-                        <button class="action-btn primary" onclick="sendCmd('stand_up')">⬆ 起立/趴下</button>
-                        <button class="action-btn" onclick="sendCmd('home')">⌂ 回零</button>
-                        <button class="action-btn danger" onclick="sendCmd('emergency_stop')">⏻ 紧急停止</button>
+                        <div class="action-buttons">
+                            <button class="action-btn primary" onclick="sendCmd('stand_up')">⬆ 起立/趴下</button>
+                            <button class="action-btn" onclick="sendCmd('home')">⌂ 回零</button>
+                            <button class="action-btn danger" onclick="sendCmd('emergency_stop')">⏻ 紧急停止</button>
+                        </div>
                     </div>
                 </div>
-            </div>
-        </main>
+            </main>
+        </div>
     </div>
     
     <script>
         // WebSocket连接
         let ws = null;
         let reconnectTimer = null;
+        
+        // 登录处理
+        function handleLogin(e) {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            // 简单验证（演示用）
+            if (username && password) {
+                document.getElementById('loginPage').style.display = 'none';
+                document.getElementById('appContainer').classList.add('visible');
+                connect();
+            }
+        }
+        
+        function handleLogout() {
+            if (ws) ws.close();
+            document.getElementById('loginPage').style.display = 'flex';
+            document.getElementById('appContainer').classList.remove('visible');
+        }
         
         function connect() {
             const wsUrl = `ws://${window.location.host}/ws`;
@@ -1015,8 +1211,6 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             document.getElementById('currentTime').textContent = 
                 new Date().toLocaleTimeString('zh-CN');
         }, 1000);
-        
-        connect();
     </script>
 </body>
 </html>"""
