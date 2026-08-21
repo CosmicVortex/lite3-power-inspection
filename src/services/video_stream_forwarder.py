@@ -14,7 +14,6 @@ import cv2
 import numpy as np
 import base64
 import io
-from PIL import Image
 import websockets
 import json
 import time
