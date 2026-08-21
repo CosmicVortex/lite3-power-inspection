@@ -59,6 +59,7 @@ class SimulationDataGenerator:
         return {
             "msgId": str(int(time.time() * 1000)),
             "ts": int(time.time() * 1000),
+            "deviceId": "LITE3-001",
             "type": "inspection_result",
             "payload": {
                 "defect_type": "crack",
@@ -113,6 +114,7 @@ class SimulationDataGenerator:
         return {
             "msgId": str(int(time.time() * 1000)),
             "ts": int(time.time() * 1000),
+            "deviceId": "LITE3-001",
             "type": "temperature_alert",
             "payload": {
                 "alert_level": level,
@@ -152,6 +154,7 @@ class SimulationDataGenerator:
         return {
             "msgId": str(int(time.time() * 1000)),
             "ts": int(time.time() * 1000),
+            "deviceId": "LITE3-001",
             "type": "heartbeat",
             "payload": {
                 "battery": random.randint(80, 95),

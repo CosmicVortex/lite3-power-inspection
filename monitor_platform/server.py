@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-绝影Lite3 监测平台 - 键盘手柄控制版
-支持方向键/WASD手柄操作
+绝影Lite3 监测平台 - 现代化UI升级版
+参考Ghost CMS设计理念：极简、专业、高质量视觉
 """
 
 import asyncio, json, time, logging, struct, socket, base64
@@ -21,25 +20,25 @@ app = FastAPI()
 WS_PORT, HTTP_PORT = 8765, 8000
 MOTION_HOST, MOTION_PORT = "192.168.1.103", 43893
 
-# ========== 官方协议指令码（来自03-运动主机通讯接口V1.0.8.md）==========
-CMD_FORWARD = 0x21010130      # 前后平移：正值向前
-CMD_LEFT = 0x21010131        # 左右平移：正值向右  
-CMD_TURN = 0x21010135        # 左右转弯：正值向右转
-CMD_STAND_UP = 0x21010202    # 起立/趴下切换
-CMD_EMERGENCY_STOP = 0x21020C0E  # 软急停
-CMD_HOME = 0x21010C05        # 回零
-CMD_MOVE_MODE = 0x21010D06   # 移动模式
-CMD_STAND_MODE = 0x21010D05  # 原地模式
+# ========== 官方协议指令码 ==========
+CMD_FORWARD = 0x21010130
+CMD_LEFT = 0x21010131
+CMD_TURN = 0x21010135
+CMD_STAND_UP = 0x21010202
+CMD_EMERGENCY_STOP = 0x21020C0E
+CMD_HOME = 0x21010C05
+CMD_MOVE_MODE = 0x21010D06
+CMD_STAND_MODE = 0x21010D05
 
-# ========== 手柄映射键位 ==========
+# ========== 按键映射 ==========
 KEY_FORWARD = ['w', 'arrowup']
 KEY_BACKWARD = ['s', 'arrowdown']
 KEY_LEFT = ['a', 'arrowleft']
 KEY_RIGHT = ['d', 'arrowright']
 KEY_TURN_LEFT = ['q', 'shift']
 KEY_TURN_RIGHT = ['e', 'ctrl']
-KEY_STAND_UP = [' ']  # 空格键起立/趴下
-KEY_EMERGENCY = ['escape']  # ESC急停
+KEY_STAND_UP = [' ']
+KEY_EMERGENCY = ['escape']
 
 # 读取机器狗图片
 ROBOT_IMAGE_URI = ""
@@ -52,72 +51,57 @@ except:
 connections: List[WebSocket] = []
 inspections: List[Dict] = []
 alerts: List[Dict] = []
-robot_status = {"battery": 68, "cpu_temp": 35.0, "gpu_load": 0, "memory_usage": 45,
-                "status": "idle", "position": {"x": 0.0, "y": 0.0},
-                "waypoint": "WP001", "total_waypoints": 5, "completed_waypoints": 0,
-                "endurance_hours": 1.8}
+robot_status = {
+    "battery": 68, "cpu_temp": 35.0, "gpu_load": 0, "memory_usage": 45,
+    "status": "idle", "position": {"x": 0.0, "y": 0.0},
+    "waypoint": "WP001", "total_waypoints": 5, "completed_waypoints": 0,
+    "endurance_hours": 1.8
+}
 motion_sock = None
-
-# 按键状态
 key_state = {"forward": False, "backward": False, "left": False, "right": False,
              "turn_left": False, "turn_right": False, "stand": False}
 
+
 def send_udp(cmd: int, value: int = 0):
-    """发送UDP指令（官方协议格式）"""
     global motion_sock
     try:
         if motion_sock is None:
             motion_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             motion_sock.settimeout(0.5)
-        # 官方格式: [cmd:4bytes][value:4bytes][reserved:4bytes]
         packet = struct.pack('<III', cmd, value, 0)
         motion_sock.sendto(packet, (MOTION_HOST, MOTION_PORT))
-        logger.debug(f"发送指令: 0x{cmd:08X}, value={value}")
     except Exception as e:
         logger.error(f"UDP发送失败: {e}")
 
+
 def calculate_velocity():
-    """根据按键状态计算速度向量"""
     vx, vy, vw = 0.0, 0.0, 0.0
-    speed = 0.5  # 基础速度
-    
-    if key_state["forward"]:
-        vy -= speed    # 向前
-    if key_state["backward"]:
-        vy += speed    # 向后
-    if key_state["left"]:
-        vx -= speed    # 向左
-    if key_state["right"]:
-        vx += speed    # 向右
-    if key_state["turn_left"]:
-        vw -= speed    # 左转
-    if key_state["turn_right"]:
-        vw += speed    # 右转
-    
+    speed = 0.5
+    if key_state["forward"]: vy -= speed
+    if key_state["backward"]: vy += speed
+    if key_state["left"]: vx -= speed
+    if key_state["right"]: vx += speed
+    if key_state["turn_left"]: vw -= speed
+    if key_state["turn_right"]: vw += speed
     return vx, vy, vw
 
+
 def send_velocity_command():
-    """发送速度控制指令"""
     vx, vy, vw = calculate_velocity()
-    
-    # 同时有多个方向时，按比例合成
     if vx != 0 or vy != 0 or vw != 0:
-        # 对角线移动时降速（约0.707）
         magnitude = (vx**2 + vy**2 + vw**2)**0.5
         if magnitude > 1.0:
             vx, vy, vw = vx/magnitude, vy/magnitude, vw/magnitude
-        
         robot_status["status"] = "moving"
-        send_udp(CMD_MOVE_MODE)  # 切换到移动模式
-        # 官方协议使用独立的轴指令
+        send_udp(CMD_MOVE_MODE)
         if vy != 0: send_udp(CMD_FORWARD, int(vy * 6553))
         if vx != 0: send_udp(CMD_LEFT, int(vx * 6553))
         if vw != 0: send_udp(CMD_TURN, int(vw * 9553))
     else:
-        # 停止移动
         if robot_status["status"] == "moving":
             send_udp(CMD_EMERGENCY_STOP)
             robot_status["status"] = "idle"
+
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
@@ -131,9 +115,9 @@ async def ws_endpoint(ws: WebSocket):
     finally:
         if ws in connections: connections.remove(ws)
 
+
 @app.post("/api/control/{action}")
 async def control(action: str):
-    """处理来自Web界面的控制请求"""
     if action == "stand_up":
         send_udp(CMD_STAND_UP)
         robot_status["status"] = "idle"
@@ -148,37 +132,39 @@ async def control(action: str):
         send_udp(CMD_STAND_MODE)
     return {"status": "ok"}
 
+
 @app.post("/api/key/{key}")
 async def key_press(key: str, state: bool = True):
-    """处理键盘按下/释放事件"""
     key = key.lower()
     if key in key_state:
         key_state[key] = state
-        if state:  # 按下
+        if state:
             robot_status["status"] = "moving"
             send_velocity_command()
-        else:  # 释放
-            # 检查是否还有其他键按下
+        else:
             if not any(key_state.values()):
                 send_udp(CMD_EMERGENCY_STOP)
                 robot_status["status"] = "idle"
     return {"status": "ok", "key": key, "state": state}
 
+
 @app.get("/")
 async def root(): return HTMLResponse(DASHBOARD_HTML)
+
 
 @app.get("/api/status")
 async def status():
     return {"clients": len(connections), "inspections": len(inspections),
             "alerts": len([a for a in alerts if not a.get("ack")])}
 
+
 @app.get("/api/robot")
 async def get_robot(): return robot_status
 
+
 @app.get("/api/keys")
-async def get_keys():
-    """获取当前按键状态"""
-    return key_state
+async def get_keys(): return key_state
+
 
 @app.post("/api/demo")
 async def demo():
@@ -204,33 +190,21 @@ async def demo():
         await ws.send_json({"type": "robot_status", "data": robot_status})
     return {"status": "ok"}
 
+
 class Monitor:
     async def process(self, data: Dict, ws=None):
-        """处理来自感知主机的WebSocket消息
-        
-        Args:
-            data: 消息数据字典
-            ws: WebSocket连接（可为None，用于非WebSocket场景）
-        """
         p = data.get("payload", data.get("data", {}))
         msg_type = data.get("type", "")
-        
         try:
             if msg_type == "system_status":
-                # 更新机器人状态
                 for k in ["battery","cpu_temp","gpu_load","memory_usage","status","waypoint","position","endurance_hours"]:
-                    if k in p:
-                        robot_status[k] = p[k]
-                # 广播状态给所有客户端
+                    if k in p: robot_status[k] = p[k]
                 for conn in connections:
                     try:
                         if hasattr(conn, 'send_json'):
                             await conn.send_json({"type": "robot_status", "data": robot_status})
-                    except:
-                        pass
-                        
+                    except: pass
             elif msg_type == "inspection_result":
-                # 保存巡检记录
                 inspections.append({
                     "ts": int(time.time() * 1000),
                     "waypoint": p.get("waypoint_id", "WP001"),
@@ -238,16 +212,12 @@ class Monitor:
                     "confidence": p.get("confidence", 0.0),
                     "measurements": p.get("measurements", {})
                 })
-                # 广播给所有客户端
                 for conn in connections:
                     try:
                         if hasattr(conn, 'send_json'):
                             await conn.send_json({"type": "inspection", "data": inspections[-1]})
-                    except:
-                        pass
-                        
+                    except: pass
             elif msg_type in ["crack_alert", "temperature_alert"]:
-                # 保存告警记录
                 alerts.append({
                     "ts": int(time.time() * 1000),
                     "type": msg_type,
@@ -255,267 +225,594 @@ class Monitor:
                     "value": p.get("value", 0),
                     "waypoint": p.get("waypoint_id", "WP001")
                 })
-                # 广播告警
                 for conn in connections:
                     try:
                         if hasattr(conn, 'send_json'):
                             await conn.send_json({"type": "alert", "data": alerts[-1]})
-                    except:
-                        pass
-                        
+                    except: pass
         except Exception as e:
             logger.error(f"处理消息失败: {e}")
 
+
 monitor = Monitor()
 
+
+# ============== 现代化UI设计 ==============
+# 参考Ghost CMS设计理念：极简、专业、高质量视觉
+# 配色方案：温暖中性色 + 强调色（琥珀/绯红/翠绿）
+# 字体：系统字体栈，高质量排版层次
 
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>绝影Lite3 监测平台 - 手柄控制版</title>
+<title>绝影Lite3 · 电力巡检监控中心</title>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
+/* ============================================
+   设计系统 - 参考Ghost CMS现代设计语言
+   ============================================ */
+
+/* 字体栈 - 专业级排版 */
+:root {
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    --font-mono: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+    
+    /* 配色方案 - 温暖中性 + 强调色 */
+    --color-bg: #fafafa;
+    --color-surface: #ffffff;
+    --color-surface-elevated: #ffffff;
+    --color-border: #e8e8e8;
+    --color-border-subtle: #f0f0f0;
+    
+    /* 文字色彩 */
+    --color-text-primary: #15171a;
+    --color-text-secondary: #65676b;
+    --color-text-tertiary: #909297;
+    
+    /* 强调色 - 灵感来自专业仪表板 */
+    --color-accent: #ff6b35;  /* 活力橙 - 品牌色 */
+    --color-accent-hover: #e85a2b;
+    --color-success: #00c853;   /* 翠绿 - 正常状态 */
+    --color-warning: #ffb300;   /* 琥珀 - 预警 */
+    --color-danger: #ff3d00;    /* 绯红 - 告警 */
+    --color-info: #2196f3;      /* 蓝色 - 信息 */
+    
+    /* 阴影层级 */
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+    --shadow-md: 0 4px 6px rgba(0,0,0,0.04), 0 2px 4px rgba(0,0,0,0.06);
+    --shadow-lg: 0 10px 25px rgba(0,0,0,0.06), 0 4px 10px rgba(0,0,0,0.08);
+    
+    /* 圆角 */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+    
+    /* 过渡动画 */
+    --transition-fast: 150ms ease;
+    --transition-normal: 250ms ease;
+    --transition-slow: 400ms ease;
+}
+
+/* 基础重置 */
+*, *::before, *::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html {
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: #f0f2f5;
-    color: #1a1a1a;
+    font-family: var(--font-sans);
+    background: var(--color-bg);
+    color: var(--color-text-primary);
+    line-height: 1.6;
     min-height: 100vh;
 }
 
-/* 顶部导航 */
-.topbar {
-    background: #fff;
-    border-bottom: 1px solid #e8e8e8;
-    height: 56px;
+/* ============================================
+   顶部导航栏 - 极简风格
+   ============================================ */
+.navbar {
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+    padding: 0 32px;
+    height: 64px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 24px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: var(--shadow-sm);
 }
 
-.topbar-left {
+.navbar-brand {
     display: flex;
     align-items: center;
     gap: 12px;
 }
 
-.topbar-logo {
-    width: 32px;
-    height: 32px;
-    background: linear-gradient(135deg, #1890ff, #096dd9);
-    border-radius: 6px;
+.brand-icon {
+    width: 36px;
+    height: 36px;
+    background: linear-gradient(135deg, var(--color-accent) 0%, #ff8f5a 100%);
+    border-radius: var(--radius-sm);
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #fff;
-    font-size: 16px;
+    color: white;
+    font-size: 18px;
+    font-weight: 700;
 }
 
-.topbar-title {
+.brand-title {
     font-size: 18px;
     font-weight: 600;
-    color: #000;
+    color: var(--color-text-primary);
+    letter-spacing: -0.3px;
 }
 
-.topbar-right {
+.brand-subtitle {
+    font-size: 12px;
+    color: var(--color-text-tertiary);
+    font-weight: 400;
+}
+
+.navbar-meta {
     display: flex;
     align-items: center;
-    gap: 20px;
-}
-
-/* 手柄控制面板 */
-.joystick-panel {
-    background: #fff;
-    border-radius: 12px;
-    border: 2px solid #1890ff;
-    padding: 20px;
-    margin-bottom: 20px;
-    box-shadow: 0 4px 12px rgba(24, 144, 255, 0.15);
-}
-
-.joystick-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 16px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid #e8e8e8;
-}
-
-.joystick-title {
-    font-size: 16px;
-    font-weight: 600;
-    color: #1890ff;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.joystick-status {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+    gap: 24px;
     font-size: 13px;
+    color: var(--color-text-secondary);
 }
 
-.status-indicator {
+.connection-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: var(--color-bg);
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.status-dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #d9d9d9;
-    transition: all 0.3s;
+    background: var(--color-text-tertiary);
+    transition: background var(--transition-fast);
 }
 
-.status-indicator.active {
-    background: #52c41a;
-    box-shadow: 0 0 8px #52c41a;
-    animation: pulse 1.5s infinite;
+.status-dot.online {
+    background: var(--color-success);
+    box-shadow: 0 0 0 3px rgba(0, 200, 83, 0.2);
+    animation: pulse 2s infinite;
 }
 
 @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
+    0%, 100% { box-shadow: 0 0 0 3px rgba(0, 200, 83, 0.2); }
+    50% { box-shadow: 0 0 0 6px rgba(0, 200, 83, 0.1); }
 }
 
-/* 手柄布局 */
-.joystick-container {
+/* ============================================
+   主内容区 - 网格布局
+   ============================================ */
+.main-container {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 32px;
+}
+
+/* ============================================
+   英雄区域 - 机器人信息卡片
+   参考Ghost的Hero设计：大图+关键数据
+   ============================================ */
+.hero-section {
     display: grid;
-    grid-template-columns: repeat(3, 80px);
-    grid-template-rows: repeat(3, 80px);
-    gap: 8px;
+    grid-template-columns: 280px 1fr;
+    gap: 32px;
+    margin-bottom: 32px;
+}
+
+.robot-card {
+    background: var(--color-surface);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow-md);
+    transition: transform var(--transition-normal), box-shadow var(--transition-normal);
+}
+
+.robot-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+}
+
+.robot-image-wrap {
+    height: 180px;
+    background: linear-gradient(135deg, #f5f5f7 0%, #e8e8ed 100%);
+    display: flex;
+    align-items: center;
     justify-content: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.robot-image-wrap::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle, rgba(255,107,53,0.05) 0%, transparent 70%);
+    animation: rotate 20s linear infinite;
+}
+
+@keyframes rotate {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.robot-image {
+    width: 140px;
+    height: 140px;
+    object-fit: contain;
+    position: relative;
+    z-index: 1;
+    filter: drop-shadow(0 8px 16px rgba(0,0,0,0.12));
+    transition: transform var(--transition-normal);
+}
+
+.robot-image:hover {
+    transform: scale(1.05);
+}
+
+.robot-info {
+    padding: 20px;
+}
+
+.robot-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin-bottom: 4px;
+}
+
+.robot-model {
+    font-size: 12px;
+    color: var(--color-text-tertiary);
+    margin-bottom: 16px;
+}
+
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #16a34a;
+}
+
+.status-badge.moving {
+    background: #fff7ed;
+    border-color: #fed7aa;
+    color: #c2410c;
+}
+
+.status-badge.inspecting {
+    background: #eff6ff;
+    border-color: #bfdbfe;
+    color: #1d4ed8;
+}
+
+/* 统计指标卡片 */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+}
+
+.stat-card {
+    background: var(--color-surface);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow var(--transition-fast);
+}
+
+.stat-card:hover {
+    box-shadow: var(--shadow-md);
+}
+
+.stat-label {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--color-text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+}
+
+.stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    letter-spacing: -1px;
+    line-height: 1;
+}
+
+.stat-unit {
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--color-text-secondary);
+    margin-left: 2px;
+}
+
+/* 电量环 - 参考Apple Watch设计 */
+.battery-ring {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 12px;
+    position: relative;
+}
+
+.battery-ring svg {
+    transform: rotate(-90deg);
+}
+
+.battery-ring-bg {
+    fill: none;
+    stroke: #f0f0f0;
+    stroke-width: 6;
+}
+
+.battery-ring-fill {
+    fill: none;
+    stroke: var(--color-success);
+    stroke-width: 6;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.5s ease, stroke var(--transition-fast);
+}
+
+.battery-percent {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+/* ============================================
+   主内容区域 - 两栏布局
+   ============================================ */
+.content-grid {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: 24px;
+}
+
+/* 面板基础样式 */
+.panel {
+    background: var(--color-surface);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+}
+
+.panel-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--color-border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.panel-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.panel-title::before {
+    content: '';
+    width: 3px;
+    height: 16px;
+    background: var(--color-accent);
+    border-radius: 2px;
+}
+
+.panel-body {
+    padding: 20px;
+}
+
+/* ============================================
+   控制区域 - 现代化手柄设计
+   ============================================ */
+.control-section {
+    margin-bottom: 24px;
+}
+
+.control-panel {
+    background: var(--color-surface);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    box-shadow: var(--shadow-sm);
+}
+
+.control-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     margin-bottom: 20px;
 }
 
-.key-btn {
-    width: 80px;
-    height: 80px;
-    border: 2px solid #d9d9d9;
-    border-radius: 12px;
-    background: #fafafa;
+.control-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+.control-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--color-text-tertiary);
+}
+
+/* D-Pad控制器 - 参考游戏手柄设计 */
+.dpad-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+}
+
+.dpad-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 64px);
+    grid-template-rows: repeat(3, 64px);
+    gap: 8px;
+}
+
+.dpad-btn {
+    width: 64px;
+    height: 64px;
+    border: 2px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-bg);
     cursor: pointer;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 4px;
-    transition: all 0.15s;
+    transition: all var(--transition-fast);
     user-select: none;
 }
 
-.key-btn:hover {
-    border-color: #1890ff;
-    background: #e6f7ff;
+.dpad-btn:hover {
+    border-color: var(--color-accent);
+    background: #fff7f5;
 }
 
-.key-btn.active {
-    border-color: #1890ff;
-    background: #1890ff;
-    color: #fff;
+.dpad-btn.active {
+    border-color: var(--color-accent);
+    background: var(--color-accent);
+    color: white;
     transform: scale(0.95);
-    box-shadow: 0 4px 12px rgba(24, 144, 255, 0.4);
 }
 
-.key-btn .key-icon {
-    font-size: 24px;
+.dpad-btn .icon {
+    font-size: 20px;
+    line-height: 1;
 }
 
-.key-btn .key-label {
-    font-size: 11px;
-    color: #666;
+.dpad-btn .label {
+    font-size: 9px;
+    font-weight: 500;
+    color: var(--color-text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
-.key-btn.active .key-label {
-    color: #fff;
+.dpad-btn.active .label {
+    color: rgba(255,255,255,0.8);
 }
 
-.key-btn .key-hint {
-    font-size: 10px;
-    color: #999;
-    margin-top: 2px;
+.dpad-btn.empty {
+    border: none;
+    background: transparent;
+    cursor: default;
 }
 
-.key-btn.emergency {
-    border-color: #ff4d4f;
-    background: #fff2f0;
-}
-
-.key-btn.emergency:hover, .key-btn.emergency.active {
-    background: #ff4d4f;
-    border-color: #ff4d4f;
-}
-
-/* 辅助按键区 */
+/* 功能按钮 */
 .action-buttons {
     display: flex;
     gap: 12px;
+    margin-top: 20px;
     justify-content: center;
-    flex-wrap: wrap;
 }
 
 .action-btn {
-    padding: 12px 24px;
-    border: 2px solid #d9d9d9;
-    border-radius: 8px;
-    background: #fafafa;
+    padding: 10px 20px;
+    border: 1.5px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
     cursor: pointer;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
-    transition: all 0.2s;
+    color: var(--color-text-secondary);
+    transition: all var(--transition-fast);
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
 }
 
 .action-btn:hover {
-    border-color: #1890ff;
-    color: #1890ff;
+    border-color: var(--color-accent);
+    color: var(--color-accent);
 }
 
 .action-btn.primary {
-    border-color: #52c41a;
-    background: #f6ffed;
-    color: #52c41a;
+    border-color: var(--color-success);
+    color: var(--color-success);
+    background: #f0fdf4;
 }
 
 .action-btn.primary:hover {
-    background: #52c41a;
-    color: #fff;
+    background: var(--color-success);
+    color: white;
 }
 
 .action-btn.danger {
-    border-color: #ff4d4f;
-    background: #fff2f0;
-    color: #ff4d4f;
+    border-color: var(--color-danger);
+    color: var(--color-danger);
+    background: #fff5f5;
 }
 
 .action-btn.danger:hover {
-    background: #ff4d4f;
-    color: #fff;
+    background: var(--color-danger);
+    color: white;
 }
 
-/* 键盘提示 */
-.key-hints {
+/* 快捷键提示 */
+.keyboard-hints {
     margin-top: 20px;
     padding: 16px;
-    background: #f9f9f9;
-    border-radius: 8px;
-    font-size: 12px;
-    color: #666;
+    background: var(--color-bg);
+    border-radius: var(--radius-md);
 }
 
-.key-hints h4 {
-    margin-bottom: 8px;
-    color: #333;
+.keyboard-hints h4 {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--color-text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
 }
 
 .hint-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 8px;
 }
 
@@ -523,6 +820,8 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
+    font-size: 12px;
+    color: var(--color-text-secondary);
 }
 
 .key-badge {
@@ -530,552 +829,495 @@ body {
     align-items: center;
     justify-content: center;
     min-width: 24px;
-    height: 24px;
+    height: 22px;
     padding: 0 6px;
-    background: #fff;
-    border: 1px solid #d9d9d9;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
     border-radius: 4px;
     font-size: 11px;
     font-weight: 600;
-    color: #333;
-    box-shadow: 0 2px 0 #d9d9d9;
+    color: var(--color-text-primary);
+    font-family: var(--font-mono);
+    box-shadow: 0 2px 0 var(--color-border);
 }
 
-/* 页面主体 */
-.page-container {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 24px;
-}
-
-.section-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 20px;
-}
-
-.section-title {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 16px;
-    font-weight: 600;
-}
-
-.section-title::before {
-    content: '';
-    width: 4px;
-    height: 18px;
-    background: linear-gradient(180deg, #1890ff, #096dd9);
-    border-radius: 2px;
-}
-
-.refresh-btn {
-    padding: 6px 12px;
-    background: #fafafa;
-    border: 1px solid #d9d9d9;
-    border-radius: 4px;
-    font-size: 13px;
-    cursor: pointer;
-}
-
-/* 机器人信息卡片 */
-.robot-info-card {
-    background: #fff;
-    border-radius: 8px;
-    border: 1px solid #e8e8e8;
-    overflow: hidden;
-    margin-bottom: 24px;
-}
-
-.robot-info-header {
-    padding: 16px 20px;
-    border-bottom: 1px solid #f0f0f0;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.robot-name {
-    font-size: 15px;
-    font-weight: 600;
-}
-
-.status-tag {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 12px;
-    background: #f6ffed;
-    border: 1px solid #b7eb8f;
-    border-radius: 20px;
-    font-size: 12px;
-    color: #52c41a;
-}
-
-.robot-info-body {
-    display: grid;
-    grid-template-columns: 140px 1fr;
-}
-
-.robot-image {
-    width: 140px;
-    height: 140px;
-    background: linear-gradient(135deg, #f5f5f5, #ebebeb);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-right: 1px solid #f0f0f0;
-}
-
-.robot-image img {
-    max-width: 90%;
-    max-height: 90%;
-}
-
-.robot-details {
-    padding: 20px;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 24px;
-}
-
-.detail-item {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.detail-label {
-    font-size: 12px;
-    color: #8c8c8c;
-}
-
-.detail-value {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.battery-icon {
-    position: relative;
-    width: 24px;
-    height: 12px;
-    border: 2px solid #52c41a;
-    border-radius: 2px;
-    display: flex;
-    align-items: center;
-    padding: 1px;
-}
-
-.battery-icon::after {
-    content: '';
-    position: absolute;
-    right: -5px;
-    width: 4px;
-    height: 6px;
-    background: #52c41a;
-    border-radius: 0 1px 1px 0;
-}
-
-.battery-level {
-    height: 100%;
-    background: #52c41a;
-    transition: width 0.5s;
-}
-
-.detail-number {
-    font-size: 22px;
-    font-weight: 600;
-    color: #1a1a1a;
-}
-
-.detail-unit {
-    font-size: 13px;
-    color: #8c8c8c;
-}
-
-/* 统计卡片 */
-.stats-row {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 16px;
-    margin-bottom: 24px;
-}
-
-.stat-card {
-    background: #fff;
-    border-radius: 8px;
-    border: 1px solid #e8e8e8;
-    padding: 20px;
-}
-
-.stat-card:hover {
-    border-color: #1890ff;
-    box-shadow: 0 2px 8px rgba(24, 144, 255, 0.1);
-}
-
-.stat-icon {
-    font-size: 24px;
-    margin-bottom: 12px;
-}
-
-.stat-number {
-    font-size: 32px;
-    font-weight: 700;
-    color: #1a1a1a;
-}
-
-.stat-label {
-    font-size: 13px;
-    color: #8c8c8c;
-    margin-top: 8px;
-}
-
-/* 主内容布局 */
-.main-layout {
-    display: grid;
-    grid-template-columns: 1fr 380px;
-    gap: 24px;
-}
-
-.panel {
-    background: #fff;
-    border-radius: 8px;
-    border: 1px solid #e8e8e8;
-    overflow: hidden;
-}
-
-.panel-header {
-    padding: 14px 16px;
-    border-bottom: 1px solid #f0f0f0;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.panel-title {
-    font-size: 14px;
-    font-weight: 600;
-}
-
-.panel-body {
-    padding: 16px;
-}
-
+/* ============================================
+   数据表格 - 现代化设计
+   ============================================ */
 .data-table {
     width: 100%;
     border-collapse: collapse;
 }
 
 .data-table th {
-    background: #fafafa;
+    background: var(--color-bg);
     padding: 12px 16px;
     text-align: left;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
-    color: #8c8c8c;
-    border-bottom: 1px solid #f0f0f0;
+    color: var(--color-text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--color-border);
 }
 
 .data-table td {
-    padding: 12px 16px;
+    padding: 14px 16px;
     font-size: 13px;
-    color: #595959;
-    border-bottom: 1px solid #f0f0f0;
+    color: var(--color-text-secondary);
+    border-bottom: 1px solid var(--color-border-subtle);
 }
 
+.data-table tr:last-child td {
+    border-bottom: none;
+}
+
+.data-table tr:hover td {
+    background: var(--color-bg);
+}
+
+/* 状态标签 */
 .tag {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 2px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border-radius: 12px;
     font-size: 11px;
     font-weight: 500;
 }
 
-.tag-success { background: #f6ffed; color: #52c41a; }
-.tag-warning { background: #fffbe6; color: #faad14; }
-.tag-error { background: #fff2f0; color: #ff4d4f; }
+.tag-success { background: #f0fdf4; color: #16a34a; }
+.tag-warning { background: #fffbeb; color: #d97706; }
+.tag-error { background: #fff5f5; color: #dc2626; }
+.tag-info { background: #eff6ff; color: #2563eb; }
 
-.video-placeholder {
-    background: #fafafa;
-    border: 1px dashed #d9d9d9;
-    border-radius: 4px;
-    padding: 32px;
-    text-align: center;
-    color: #8c8c8c;
-}
-
-.alert-list {
-    max-height: 200px;
+/* ============================================
+   告警列表 - 时间线样式
+   ============================================ */
+.alert-timeline {
+    max-height: 320px;
     overflow-y: auto;
 }
 
-.alert-item {
-    padding: 10px 12px;
-    margin-bottom: 6px;
-    border-radius: 4px;
-    border-left: 3px solid;
-    background: #fafafa;
-    font-size: 12px;
+.alert-timeline::-webkit-scrollbar {
+    width: 4px;
 }
 
-.alert-item.warn { border-color: #faad14; }
-.alert-item.critical { border-color: #ff4d4f; }
+.alert-timeline::-webkit-scrollbar-track {
+    background: transparent;
+}
 
+.alert-timeline::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 2px;
+}
+
+.alert-item {
+    display: flex;
+    gap: 12px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--color-border-subtle);
+    animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+    from { opacity: 0; transform: translateX(-10px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+.alert-item:last-child {
+    border-bottom: none;
+}
+
+.alert-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-top: 6px;
+    flex-shrink: 0;
+}
+
+.alert-indicator.warn { background: var(--color-warning); }
+.alert-indicator.critical { background: var(--color-danger); }
+.alert-indicator.normal { background: var(--color-success); }
+
+.alert-content {
+    flex: 1;
+}
+
+.alert-type {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-text-primary);
+}
+
+.alert-detail {
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    margin-top: 2px;
+}
+
+.alert-time {
+    font-size: 11px;
+    color: var(--color-text-tertiary);
+    white-space: nowrap;
+}
+
+/* ============================================
+   视频占位符 - 高质量设计
+   ============================================ */
+.video-placeholder {
+    background: linear-gradient(135deg, #f5f5f7 0%, #e8e8ed 100%);
+    border-radius: var(--radius-md);
+    padding: 48px;
+    text-align: center;
+    color: var(--color-text-tertiary);
+}
+
+.video-placeholder .icon {
+    font-size: 40px;
+    margin-bottom: 12px;
+    opacity: 0.5;
+}
+
+.video-placeholder .text {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.video-placeholder .subtext {
+    font-size: 12px;
+    margin-top: 4px;
+    font-family: var(--font-mono);
+}
+
+/* ============================================
+   空状态
+   ============================================ */
 .empty-state {
     text-align: center;
-    padding: 40px;
-    color: #bfbfbf;
+    padding: 48px 24px;
+    color: var(--color-text-tertiary);
 }
 
+.empty-state .icon {
+    font-size: 32px;
+    margin-bottom: 12px;
+    opacity: 0.4;
+}
+
+.empty-state .text {
+    font-size: 14px;
+}
+
+/* ============================================
+   响应式设计
+   ============================================ */
 @media (max-width: 1200px) {
-    .main-layout { grid-template-columns: 1fr; }
-    .robot-info-body { grid-template-columns: 1fr; }
-    .robot-image { width: 100%; height: 160px; border-right: none; border-bottom: 1px solid #f0f0f0; }
-    .robot-details { grid-template-columns: repeat(2, 1fr); }
+    .hero-section {
+        grid-template-columns: 1fr;
+    }
+    .robot-card {
+        max-width: 400px;
+    }
+    .content-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 768px) {
+    .navbar {
+        padding: 0 16px;
+    }
+    .main-container {
+        padding: 16px;
+    }
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+    .hint-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .dpad-grid {
+        grid-template-columns: repeat(3, 56px);
+        grid-template-rows: repeat(3, 56px);
+    }
+    .dpad-btn {
+        width: 56px;
+        height: 56px;
+    }
 }
 </style>
 </head>
 <body>
-    <!-- 顶部导航 -->
-    <div class="topbar">
-        <div class="topbar-left">
-            <div class="topbar-logo">🤖</div>
-            <span class="topbar-title">巡检监控中心</span>
+    <!-- 顶部导航栏 -->
+    <nav class="navbar">
+        <div class="navbar-brand">
+            <div class="brand-icon">L3</div>
+            <div>
+                <div class="brand-title">绝影Lite3 · 电力巡检监控中心</div>
+                <div class="brand-subtitle">Guangxi Electric Power Vocational College</div>
+            </div>
         </div>
-        <div class="topbar-right">
-            <div class="status-indicator">
+        <div class="navbar-meta">
+            <div class="connection-status">
                 <div class="status-dot" id="connDot"></div>
                 <span id="connStatus">未连接</span>
             </div>
-            <div>📡 <span id="clientCount">0</span> 在线</div>
-            <div>🕐 <span id="currentTime">--:--:--</span></div>
+            <div>
+                <span style="color:var(--color-text-tertiary)">在线:</span>
+                <strong id="clientCount">0</strong>
+            </div>
+            <div>
+                <span style="color:var(--color-text-tertiary)">时间:</span>
+                <strong id="currentTime">--:--:--</strong>
+            </div>
         </div>
-    </div>
+    </nav>
 
-    <!-- 页面主体 -->
-    <div class="page-container">
-        <!-- 手柄控制面板 -->
-        <div class="joystick-panel">
-            <div class="joystick-header">
-                <div class="joystick-title">
-                    🎮 手柄控制面板
-                    <span style="font-size:12px;color:#999;font-weight:400">（按住按键持续移动，松开停止）</span>
+    <!-- 主内容区 -->
+    <main class="main-container">
+        <!-- 英雄区域：机器人状态 -->
+        <section class="hero-section">
+            <!-- 机器人卡片 -->
+            <div class="robot-card">
+                <div class="robot-image-wrap">
+                    <img src="__ROBOT_IMAGE__" alt="绝影Lite3" class="robot-image" 
+                         onerror="this.style.display='none';this.parentElement.innerHTML='<div style=\\'font-size:64px;opacity:0.3\\'>🐕</div>'">
                 </div>
-                <div class="joystick-status">
-                    <div class="status-indicator" id="joystickStatus"></div>
-                    <span id="joystickText">就绪</span>
+                <div class="robot-info">
+                    <div class="robot-name">绝影Lite3 #001</div>
+                    <div class="robot-model">云深处 · 专业版 · Jetson NX</div>
+                    <div class="status-badge" id="statusBadge">
+                        <span>●</span>
+                        <span id="statusText">待机中</span>
+                    </div>
                 </div>
             </div>
             
-            <!-- 方向控制区 -->
-            <div class="joystick-container">
-                <div></div>
-                <div class="key-btn" id="key-forward" data-key="forward">
-                    <span class="key-icon">↑</span>
-                    <span class="key-label">前进</span>
-                    <span class="key-hint">W / ↑</span>
+            <!-- 统计指标 -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">电池电量</div>
+                    <div class="battery-ring">
+                        <svg width="64" height="64" viewBox="0 0 64 64">
+                            <circle class="battery-ring-bg" cx="32" cy="32" r="28"/>
+                            <circle class="battery-ring-fill" id="batteryRing" cx="32" cy="32" r="28"
+                                    stroke-dasharray="175.9" stroke-dashoffset="53"/>
+                        </svg>
+                        <span class="battery-percent" id="batteryPercent">70%</span>
+                    </div>
                 </div>
-                <div></div>
-                
-                <div class="key-btn" id="key-left" data-key="left">
-                    <span class="key-icon">←</span>
-                    <span class="key-label">左移</span>
-                    <span class="key-hint">A / ←</span>
+                <div class="stat-card">
+                    <div class="stat-label">预估续航</div>
+                    <div class="stat-value"><span id="enduranceValue">1.8</span><span class="stat-unit">h</span></div>
                 </div>
-                <div class="key-btn" id="key-stop" style="opacity:0.3;cursor:default">
-                    <span class="key-icon">⏹</span>
-                    <span class="key-label">停止</span>
+                <div class="stat-card">
+                    <div class="stat-label">CPU 温度</div>
+                    <div class="stat-value"><span id="cpuTempValue">35.0</span><span class="stat-unit">°C</span></div>
                 </div>
-                <div class="key-btn" id="key-right" data-key="right">
-                    <span class="key-icon">→</span>
-                    <span class="key-label">右移</span>
-                    <span class="key-hint">D / →</span>
+                <div class="stat-card">
+                    <div class="stat-label">GPU 负载</div>
+                    <div class="stat-value"><span id="gpuLoadValue">0</span><span class="stat-unit">%</span></div>
                 </div>
-                
-                <div></div>
-                <div class="key-btn" id="key-backward" data-key="backward">
-                    <span class="key-icon">↓</span>
-                    <span class="key-label">后退</span>
-                    <span class="key-hint">S / ↓</span>
+                <div class="stat-card">
+                    <div class="stat-label">当前位置</div>
+                    <div class="stat-value" style="font-size:18px"><span id="positionValue">(0.0, 0.0)</span></div>
                 </div>
-                <div></div>
-            </div>
-            
-            <!-- 旋转控制 -->
-            <div style="text-align:center;margin-bottom:16px">
-                <span style="font-size:12px;color:#999">旋转控制: </span>
-                <span class="key-badge">Q</span> 左转 
-                <span class="key-badge">E</span> 右转 
-                <span class="key-badge">Shift</span> 左转 
-                <span class="key-badge">Ctrl</span> 右转
-            </div>
-            
-            <!-- 功能按键 -->
-            <div class="action-buttons">
-                <button class="action-btn primary" onclick="sendCmd('stand_up')">⬆ 起立/趴下</button>
-                <button class="action-btn danger" onclick="sendCmd('emergency_stop')">🛑 急停</button>
-                <button class="action-btn" onclick="sendCmd('home')">🏠 回零</button>
-            </div>
-            
-            <!-- 键盘提示 -->
-            <div class="key-hints">
-                <h4>📋 键盘操作说明</h4>
-                <div class="hint-grid">
-                    <div class="hint-item"><span class="key-badge">W</span> / <span class="key-badge">↑</span> 前进</div>
-                    <div class="hint-item"><span class="key-badge">S</span> / <span class="key-badge">↓</span> 后退</div>
-                    <div class="hint-item"><span class="key-badge">A</span> / <span class="key-badge">←</span> 左移</div>
-                    <div class="hint-item"><span class="key-badge">D</span> / <span class="key-badge">→</span> 右移</div>
-                    <div class="hint-item"><span class="key-badge">Q</span> / <span class="key-badge">Shift</span> 左转</div>
-                    <div class="hint-item"><span class="key-badge">E</span> / <span class="key-badge">Ctrl</span> 右转</div>
-                    <div class="hint-item"><span class="key-badge">Space</span> 起立/趴下</div>
-                    <div class="hint-item"><span class="key-badge">Esc</span> 急停</div>
+                <div class="stat-card">
+                    <div class="stat-label">当前航点</div>
+                    <div class="stat-value" style="font-size:20px"><span id="waypointValue">WP001</span></div>
                 </div>
             </div>
-        </div>
+        </section>
 
-        <!-- 章节标题 -->
-        <div class="section-header">
-            <div class="section-title">实时数据</div>
-            <button class="refresh-btn" onclick="refreshData()">↻ 刷新</button>
-        </div>
-
-        <!-- 机器人信息卡片 -->
-        <div class="robot-info-card">
-            <div class="robot-info-header">
-                <div class="robot-name">机器狗 #02</div>
-                <div class="status-tag"><span>●</span> 在线</div>
-            </div>
-            <div class="robot-info-body">
-                <div class="robot-image">
-                    <img src="__ROBOT_IMAGE__" alt="机器狗" onerror="this.style.display='none';this.parentElement.innerHTML='🐕'">
-                </div>
-                <div class="robot-details">
-                    <div class="detail-item">
-                        <div class="detail-label">电量</div>
-                        <div class="detail-value">
-                            <div class="battery-icon"><div class="battery-level" id="batteryLevel" style="width:68%"></div></div>
-                            <span class="detail-number" id="batteryValue">68%</span>
-                        </div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-label">预估续航</div>
-                        <div class="detail-value">
-                            <span class="detail-number" id="enduranceValue">1.8</span>
-                            <span class="detail-unit">h</span>
-                        </div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-label">CPU温度</div>
-                        <div class="detail-value">
-                            <span class="detail-number" id="cpuTempValue">35.0</span>
-                            <span class="detail-unit">℃</span>
-                        </div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-label">GPU负载</div>
-                        <div class="detail-value">
-                            <span class="detail-number" id="gpuLoadValue">0</span>
-                            <span class="detail-unit">%</span>
-                        </div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-label">运行状态</div>
-                        <div class="detail-value">
-                            <span class="detail-number" id="statusValue" style="font-size:16px">待机</span>
-                        </div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-label">当前位置</div>
-                        <div class="detail-value">
-                            <span class="detail-number" id="positionValue" style="font-size:14px">(0.0, 0.0)</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- 统计卡片 -->
-        <div class="stats-row">
-            <div class="stat-card">
-                <div class="stat-icon">📊</div>
-                <div class="stat-number" id="totalInspections">0</div>
-                <div class="stat-label">总巡检次数</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon">✅</div>
-                <div class="stat-number" id="normalCount">0</div>
-                <div class="stat-label">正常检测</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon">🔍</div>
-                <div class="stat-number" id="crackCount">0</div>
-                <div class="stat-label">裂缝检测</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon">⚠️</div>
-                <div class="stat-number" id="alertCount">0</div>
-                <div class="stat-label">待处理告警</div>
-            </div>
-        </div>
-
-        <!-- 主内容 -->
-        <div class="main-layout">
+        <!-- 主内容区域 -->
+        <section class="content-grid">
+            <!-- 左栏：数据与控制 -->
             <div class="left-column">
+                <!-- 控制区域 -->
+                <div class="control-section">
+                    <div class="control-panel">
+                        <div class="control-header">
+                            <div class="control-title">运动控制</div>
+                            <div class="control-status">
+                                <div class="status-dot" id="joystickStatus"></div>
+                                <span id="joystickText">就绪</span>
+                            </div>
+                        </div>
+                        
+                        <div class="dpad-container">
+                            <div class="dpad-grid">
+                                <div class="dpad-btn empty"></div>
+                                <div class="dpad-btn" id="key-forward" data-key="forward">
+                                    <span class="icon">↑</span>
+                                    <span class="label">前进</span>
+                                </div>
+                                <div class="dpad-btn empty"></div>
+                                
+                                <div class="dpad-btn" id="key-left" data-key="left">
+                                    <span class="icon">←</span>
+                                    <span class="label">左移</span>
+                                </div>
+                                <div class="dpad-btn empty" style="opacity:0.2;cursor:default">
+                                    <span class="icon">⏹</span>
+                                </div>
+                                <div class="dpad-btn" id="key-right" data-key="right">
+                                    <span class="icon">→</span>
+                                    <span class="label">右移</span>
+                                </div>
+                                
+                                <div class="dpad-btn empty"></div>
+                                <div class="dpad-btn" id="key-backward" data-key="backward">
+                                    <span class="icon">↓</span>
+                                    <span class="label">后退</span>
+                                </div>
+                                <div class="dpad-btn empty"></div>
+                            </div>
+                            
+                            <div class="action-buttons">
+                                <button class="action-btn primary" onclick="sendCmd('stand_up')">
+                                    <span>⬆</span> 起立/趴下
+                                </button>
+                                <button class="action-btn danger" onclick="sendCmd('emergency_stop')">
+                                    <span>⏻</span> 急停
+                                </button>
+                                <button class="action-btn" onclick="sendCmd('home')">
+                                    <span>⌂</span> 回零
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="keyboard-hints">
+                            <h4>快捷键操作</h4>
+                            <div class="hint-grid">
+                                <div class="hint-item"><span class="key-badge">W</span> 前进</div>
+                                <div class="hint-item"><span class="key-badge">S</span> 后退</div>
+                                <div class="hint-item"><span class="key-badge">A</span> 左移</div>
+                                <div class="hint-item"><span class="key-badge">D</span> 右移</div>
+                                <div class="hint-item"><span class="key-badge">Q</span> 左转</div>
+                                <div class="hint-item"><span class="key-badge">E</span> 右转</div>
+                                <div class="hint-item"><span class="key-badge">Space</span> 起立</div>
+                                <div class="hint-item"><span class="key-badge">Esc</span> 急停</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 巡检记录 -->
                 <div class="panel">
                     <div class="panel-header">
-                        <div class="panel-title">最近巡检记录</div>
-                        <span style="font-size:12px;color:#8c8c8c" id="inspectionTime">--:--:--</span>
+                        <div class="panel-title">实时巡检记录</div>
+                        <span style="font-size:12px;color:var(--color-text-tertiary)" id="inspectionTime">--:--:--</span>
                     </div>
                     <div class="panel-body" style="padding:0">
                         <table class="data-table">
                             <thead>
-                                <tr><th>时间</th><th>设备</th><th>航点</th><th>裂缝数</th><th>温度</th><th>状态</th></tr>
+                                <tr>
+                                    <th>时间</th>
+                                    <th>设备</th>
+                                    <th>航点</th>
+                                    <th>缺陷类型</th>
+                                    <th>置信度</th>
+                                    <th>状态</th>
+                                </tr>
                             </thead>
                             <tbody id="inspectionTable">
-                                <tr><td colspan="6"><div class="empty-state">暂无数据</div></td></tr>
+                                <tr><td colspan="6"><div class="empty-state"><div class="icon">📊</div><div class="text">暂无巡检数据</div></div></td></tr>
                             </tbody>
                         </table>
                     </div>
                 </div>
-                <div class="panel" style="margin-top:16px">
-                    <div class="panel-header"><div class="panel-title">实时视频流</div></div>
+
+                <!-- 视频流 -->
+                <div class="panel" style="margin-top:24px">
+                    <div class="panel-header">
+                        <div class="panel-title">实时视频流</div>
+                        <span style="font-size:12px;color:var(--color-text-tertiary)">RTSP: 192.168.1.108:554</span>
+                    </div>
                     <div class="panel-body">
                         <div class="video-placeholder">
-                            <div style="font-size:36px;margin-bottom:8px;opacity:0.5">📹</div>
-                            <div>视频流暂未连接</div>
-                            <div style="font-size:12px;color:#bfbfbf;margin-top:8px">RTSP: rtsp://192.168.1.108:554/id=1&type=0</div>
+                            <div class="icon">📹</div>
+                            <div class="text">视频流暂未连接</div>
+                            <div class="subtext">等待感知主机连接后自动加载</div>
                         </div>
                     </div>
                 </div>
             </div>
+
+            <!-- 右栏：告警与控制 -->
             <div class="right-column">
-                <div class="panel">
-                    <div class="panel-header"><div class="panel-title">演示控制</div></div>
+                <!-- 演示控制 -->
+                <div class="panel" style="margin-bottom:24px">
+                    <div class="panel-header">
+                        <div class="panel-title">演示控制</div>
+                    </div>
                     <div class="panel-body">
-                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-                            <button class="action-btn" onclick="sendDemo()" style="justify-content:center">📊 发送巡检数据</button>
-                            <button class="action-btn" onclick="sendDemoStatus()" style="justify-content:center">🔄 更新状态</button>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                            <button class="action-btn primary" onclick="sendDemo()" style="justify-content:center">
+                                <span>📊</span> 发送数据
+                            </button>
+                            <button class="action-btn" onclick="sendDemoStatus()" style="justify-content:center">
+                                <span>🔄</span> 更新状态
+                            </button>
                         </div>
                     </div>
                 </div>
-                <div class="panel" style="margin-top:16px">
-                    <div class="panel-header"><div class="panel-title">实时告警</div></div>
+
+                <!-- 实时告警 -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title">实时告警</div>
+                        <span style="font-size:12px;color:var(--color-text-tertiary)" id="alertCount">0 条</span>
+                    </div>
+                    <div class="panel-body" style="padding:0">
+                        <div class="alert-timeline" id="alertList">
+                            <div class="empty-state" style="padding:32px">
+                                <div class="icon">✓</div>
+                                <div class="text">暂无告警</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 系统统计 -->
+                <div class="panel" style="margin-top:24px">
+                    <div class="panel-header">
+                        <div class="panel-title">系统统计</div>
+                    </div>
                     <div class="panel-body">
-                        <div class="alert-list" id="alertList">
-                            <div class="empty-state" style="padding:20px">暂无告警</div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                            <div style="text-align:center">
+                                <div style="font-size:24px;font-weight:700;color:var(--color-text-primary)" id="totalInspections">0</div>
+                                <div style="font-size:11px;color:var(--color-text-tertiary);margin-top:4px">总巡检次数</div>
+                            </div>
+                            <div style="text-align:center">
+                                <div style="font-size:24px;font-weight:700;color:var(--color-success)" id="normalCount">0</div>
+                                <div style="font-size:11px;color:var(--color-text-tertiary);margin-top:4px">正常检测</div>
+                            </div>
+                            <div style="text-align:center">
+                                <div style="font-size:24px;font-weight:700;color:var(--color-warning)" id="crackCount">0</div>
+                                <div style="font-size:11px;color:var(--color-text-tertiary);margin-top:4px">裂缝检测</div>
+                            </div>
+                            <div style="text-align:center">
+                                <div style="font-size:24px;font-weight:700;color:var(--color-danger)" id="alertTotal">0</div>
+                                <div style="font-size:11px;color:var(--color-text-tertiary);margin-top:4px">待处理告警</div>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
-    </div>
+        </section>
+    </main>
 
     <script>
-        let ws = null, inspections = [], alerts = [];
-        let robot = { battery: 68, cpu_temp: 35, gpu_load: 0, memory_usage: 45, status: 'idle', waypoint: 'WP001', endurance_hours: 1.8 };
+        let ws = null;
+        let inspections = [];
+        let alerts = [];
+        let robot = { battery: 68, cpu_temp: 35, gpu_load: 0, memory_usage: 45, 
+                      status: 'idle', waypoint: 'WP001', endurance_hours: 1.8, 
+                      position: {x: 0, y: 0} };
         let activeKeys = new Set();
         
         // 按键映射
@@ -1088,6 +1330,7 @@ body {
             'e': 'turn_right', 'ctrl': 'turn_right'
         };
         
+        // WebSocket连接
         function connect() {
             ws = new WebSocket('ws://' + location.host + ':8765/ws');
             ws.onopen = () => {
@@ -1098,11 +1341,12 @@ body {
                 const m = JSON.parse(e.data);
                 if (m.type === 'inspection') addInspection(m.data);
                 else if (m.type === 'robot_status') updateRobot(m.data);
+                else if (m.type === 'alert') addAlert(m.data);
             };
             ws.onclose = () => setTimeout(connect, 3000);
         }
         
-        // 键盘事件处理
+        // 键盘事件
         document.addEventListener('keydown', (e) => {
             const key = e.key.toLowerCase();
             const mappedKey = keyMap[key];
@@ -1136,9 +1380,7 @@ body {
         
         function updateKeyVisual(key, active) {
             const btn = document.getElementById('key-' + key);
-            if (btn) {
-                btn.classList.toggle('active', active);
-            }
+            if (btn) btn.classList.toggle('active', active);
         }
         
         async function sendKeyCommand(key, isPressed) {
@@ -1147,41 +1389,125 @@ body {
             } catch(e) { console.error(e); }
         }
         
+        // 数据处理
         function addInspection(d) {
-            inspections.unshift({ time: new Date().toLocaleTimeString(), cracks: Math.floor(Math.random()*3), temp: d.temperature?.value || 35, status: d.temperature?.status || 'NORMAL' });
+            inspections.unshift({
+                time: new Date().toLocaleTimeString(),
+                waypoint: d.waypoint_id || 'WP001',
+                defect_type: d.defect_type || 'crack',
+                confidence: d.confidence || 0.9,
+                measurements: d.measurements || {}
+            });
             if (inspections.length > 20) inspections.pop();
             renderTable();
-            document.getElementById('totalInspections').textContent = inspections.length;
-            document.getElementById('crackCount').textContent = inspections.filter(i=>i.cracks>0).length;
+            updateStats();
             document.getElementById('inspectionTime').textContent = inspections[0]?.time || '--:--:--';
         }
         
         function renderTable() {
             const tb = document.getElementById('inspectionTable');
-            if (!inspections.length) { tb.innerHTML = '<tr><td colspan="6"><div class="empty-state">暂无数据</div></td></tr>'; return; }
+            if (!inspections.length) {
+                tb.innerHTML = '<tr><td colspan="6"><div class="empty-state"><div class="icon">📊</div><div class="text">暂无巡检数据</div></div></td></tr>';
+                return;
+            }
             tb.innerHTML = inspections.map(i => {
-                const c = i.status === 'NORMAL' ? 'success' : i.status === 'WARN' ? 'warning' : 'error';
-                return `<tr><td>${i.time}</td><td>LITE3-001</td><td>WP00${Math.floor(Math.random()*5)+1}</td><td>${i.cracks}</td><td>${i.temp}℃</td><td><span class="tag tag-${c}">${i.status}</span></td></tr>`;
+                const c = i.defect_type === 'crack' ? 'info' : 'warning';
+                const conf = Math.round((i.confidence || 0.9) * 100);
+                return `<tr>
+                    <td>${i.time}</td>
+                    <td>LITE3-001</td>
+                    <td>${i.waypoint}</td>
+                    <td><span class="tag tag-${c}">${i.defect_type === 'crack' ? '裂缝' : '蜂窝'}</span></td>
+                    <td>${conf}%</td>
+                    <td><span class="tag tag-success">正常</span></td>
+                </tr>`;
             }).join('');
         }
         
         function updateRobot(d) {
-            robot = d;
-            document.getElementById('batteryValue').textContent = d.battery + '%';
-            document.getElementById('batteryLevel').style.width = d.battery + '%';
+            robot = {...robot, ...d};
+            
+            // 更新电量环
+            const battery = d.battery || 68;
+            const circumference = 175.9;
+            const offset = circumference - (battery / 100) * circumference;
+            const ring = document.getElementById('batteryRing');
+            ring.style.strokeDashoffset = offset;
+            ring.style.stroke = battery > 50 ? 'var(--color-success)' : battery > 20 ? 'var(--color-warning)' : 'var(--color-danger)';
+            document.getElementById('batteryPercent').textContent = battery + '%';
+            
+            // 更新数值
             document.getElementById('enduranceValue').textContent = (d.endurance_hours || 1.8).toFixed(1);
             document.getElementById('cpuTempValue').textContent = (d.cpu_temp || 35).toFixed(1);
             document.getElementById('gpuLoadValue').textContent = d.gpu_load || 0;
-            const sm = { 'idle': '待机', 'moving': '运动中', 'inspecting': '巡检中' };
-            document.getElementById('statusValue').textContent = sm[d.status] || d.status;
-            if (d.position) document.getElementById('positionValue').textContent = `(${d.position.x.toFixed(1)}, ${d.position.y.toFixed(1)})`;
             
-            // 更新手柄状态指示
+            // 更新状态
+            const sm = { 'idle': '待机中', 'moving': '运动中', 'inspecting': '巡检中' };
+            const st = sm[d.status] || d.status;
+            document.getElementById('statusText').textContent = st;
+            
+            // 更新状态徽章样式
+            const badge = document.getElementById('statusBadge');
+            badge.className = 'status-badge' + (d.status === 'moving' ? ' moving' : d.status === 'inspecting' ? ' inspecting' : '');
+            
+            // 更新位置
+            if (d.position) {
+                document.getElementById('positionValue').textContent = 
+                    `(${d.position.x.toFixed(1)}, ${d.position.y.toFixed(1)})`;
+            }
+            
+            // 更新航点
+            if (d.waypoint) {
+                document.getElementById('waypointValue').textContent = d.waypoint;
+            }
+            
+            // 更新手柄状态
             const isActive = d.status === 'moving';
-            document.getElementById('joystickStatus').className = 'status-indicator' + (isActive ? ' active' : '');
+            document.getElementById('joystickStatus').className = 'status-dot' + (isActive ? ' online' : '');
             document.getElementById('joystickText').textContent = isActive ? '移动中' : '就绪';
         }
         
+        function addAlert(d) {
+            alerts.unshift({
+                time: new Date().toLocaleTimeString(),
+                type: d.type || 'temperature_alert',
+                level: d.level || 'warn',
+                waypoint: d.waypoint || 'WP001'
+            });
+            if (alerts.length > 10) alerts.pop();
+            renderAlerts();
+            updateStats();
+        }
+        
+        function renderAlerts() {
+            const container = document.getElementById('alertList');
+            if (!alerts.length) {
+                container.innerHTML = '<div class="empty-state" style="padding:32px"><div class="icon">✓</div><div class="text">暂无告警</div></div>';
+                return;
+            }
+            container.innerHTML = alerts.map(a => {
+                const icons = { warn: '⚠️', critical: '🔴', normal: '✅' };
+                const labels = { warn: '温度预警', critical: '高温告警', normal: '恢复正常' };
+                return `<div class="alert-item">
+                    <div class="alert-indicator ${a.level}"></div>
+                    <div class="alert-content">
+                        <div class="alert-type">${icons[a.level] || '⚠️'} ${labels[a.level] || a.type}</div>
+                        <div class="alert-detail">航点: ${a.waypoint}</div>
+                    </div>
+                    <div class="alert-time">${a.time}</div>
+                </div>`;
+            }).join('');
+            document.getElementById('alertCount').textContent = alerts.length + ' 条';
+        }
+        
+        function updateStats() {
+            document.getElementById('totalInspections').textContent = inspections.length;
+            document.getElementById('normalCount').textContent = inspections.filter(i => i.defect_type !== 'crack').length;
+            document.getElementById('crackCount').textContent = inspections.filter(i => i.defect_type === 'crack').length;
+            document.getElementById('alertTotal').textContent = alerts.length;
+        }
+        
+        // API调用
         async function sendCmd(c) {
             try { await fetch('/api/control/' + c, {method: 'POST'}); } catch(e) {}
         }
@@ -1194,30 +1520,30 @@ body {
             try { await fetch('/api/demo', {method: 'POST'}); } catch(e) {}
         }
         
-        function refreshData() {
-            fetch('/api/robot').then(r => r.json()).then(d => updateRobot(d));
-        }
+        // 定时更新
+        setInterval(() => {
+            document.getElementById('currentTime').textContent = new Date().toLocaleTimeString();
+        }, 1000);
         
-        setInterval(() => document.getElementById('currentTime').textContent = new Date().toLocaleTimeString(), 1000);
-        setInterval(() => fetch('/api/status').then(r => r.json()).then(d => {
-            document.getElementById('clientCount').textContent = d.clients;
-        }), 2000);
+        setInterval(() => {
+            fetch('/api/status').then(r => r.json()).then(d => {
+                document.getElementById('clientCount').textContent = d.clients;
+            });
+        }, 2000);
         
+        // 初始化
         connect();
     </script>
 </body>
 </html>"""
 
 
-
 async def ws_server():
     """独立的WebSocket服务器（端口8765）"""
     async def handler(websocket, path=None):
-        """处理WebSocket连接"""
         connections.append(websocket)
         logger.info(f"感知主机连接: {websocket.remote_address}")
         
-        # 发送初始状态（websockets库格式）
         import websockets
         await websocket.send(json.dumps({"type": "robot_status", "data": robot_status}))
         
@@ -1225,7 +1551,6 @@ async def ws_server():
             async for message in websocket:
                 try:
                     data = json.loads(message)
-                    # 使用新的Monitor处理（传入websocket用于广播）
                     await monitor.process(data, websocket)
                 except json.JSONDecodeError:
                     logger.warning("收到非JSON消息")
@@ -1242,8 +1567,7 @@ async def ws_server():
     
     async with websockets.serve(handler, "0.0.0.0", WS_PORT):
         logger.info(f"WebSocket服务器启动: ws://0.0.0.0:{WS_PORT}")
-        await asyncio.Future()  # 永久运行
-
+        await asyncio.Future()
 
 
 async def main():
@@ -1253,19 +1577,17 @@ async def main():
     else:
         DASHBOARD_HTML = DASHBOARD_HTML.replace('__ROBOT_IMAGE__', 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiByPSI0MCIgZmlsbD0iI2RkZCIvPjx0ZXh0IHg9IjUwIiB5PSI2MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSI0MCI+8J+OwDwvdGV4dD48L3N2Zz4=')
     
-    # 启动HTTP服务器
     http_config = uvicorn.Config(app, host="0.0.0.0", port=HTTP_PORT, log_level="info")
     http_server = uvicorn.Server(http_config)
     
-    # 启动WebSocket服务器（并发运行）
     ws_task = asyncio.create_task(ws_server())
     
     logger.info(f"监测平台启动:")
     logger.info(f"  HTTP服务: http://0.0.0.0:{HTTP_PORT}")
     logger.info(f"  WebSocket: ws://0.0.0.0:{WS_PORT}")
     
-    # 并发运行两个服务器
     await asyncio.gather(http_server.serve(), ws_task)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
