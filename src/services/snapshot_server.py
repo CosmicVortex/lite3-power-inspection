@@ -4,14 +4,78 @@
 快照HTTP服务
 
 提供告警快照图片的HTTP访问接口
+使用Python标准库实现，无需额外依赖
 """
 
 import os
 import asyncio
-# 使用aiohttp.web，需要安装: pip install aiohttp
-# 或使用http.server替代
+import threading
 from pathlib import Path
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse
+import json
 from loguru import logger
+
+
+class SnapshotHandler(BaseHTTPRequestHandler):
+    """快照请求处理器"""
+    
+    snapshot_dir = None
+    
+    def do_GET(self):
+        """处理GET请求"""
+        parsed = urlparse(self.path)
+        path = parsed.path
+        
+        # 只允许访问/snap/路径
+        if not path.startswith('/snap/'):
+            self.send_response(404)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Not found"}).encode())
+            return
+        
+        # 提取快照文件名
+        snapshot_id = path[6:]  # 移除/snap/前缀
+        
+        # 构建完整路径
+        if SnapshotHandler.snapshot_dir is None:
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Snapshot directory not configured"}).encode())
+            return
+        
+        file_path = Path(SnapshotHandler.snapshot_dir) / f"{snapshot_id}.jpg"
+        
+        if not file_path.exists():
+            self.send_response(404)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Snapshot not found"}).encode())
+            return
+        
+        # 读取并返回文件
+        try:
+            with open(file_path, 'rb') as f:
+                image_data = f.read()
+            
+            self.send_response(200)
+            self.send_header('Content-Type', 'image/jpeg')
+            self.send_header('Content-Length', len(image_data))
+            self.end_headers()
+            self.wfile.write(image_data)
+            
+        except Exception as e:
+            logger.error(f"读取快照文件失败: {e}")
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e)}).encode())
+    
+    def log_message(self, format, *args):
+        """自定义日志格式"""
+        logger.debug(f"[SnapshotServer] {args[0]}")
 
 
 class SnapshotServer:
@@ -20,136 +84,71 @@ class SnapshotServer:
     提供静态文件服务，用于访问告警快照图片。
     """
     
-    def __init__(self, snapshot_dir: str = "data/snapshots", host: str = "0.0.0.0", port: int = 8080):
-        """
-        Args:
-            snapshot_dir: 快照文件存储目录
-            host: HTTP服务监听地址
-            port: HTTP服务端口
-        """
-        self.snapshot_dir = Path(snapshot_dir)
-        self.snapshot_dir.mkdir(parents=True, exist_ok=True)
+    def __init__(self, host: str = "127.0.0.1", port: int = 8080, snapshot_dir: str = "data/snapshots"):
         self.host = host
         self.port = port
-        self._server = None
+        self.snapshot_dir = snapshot_dir
+        self.server = None
+        self.thread = None
+        self.running = False
         
-        logger.info(f"初始化快照服务: {self.snapshot_dir} (port={port})")
+        # 配置处理器
+        SnapshotHandler.snapshot_dir = snapshot_dir
+        
+        logger.info(f"快照服务初始化: {host}:{port}, 目录={snapshot_dir}")
     
-    async def start(self):
-        """启动HTTP服务"""
-        from aiohttp import web
+    def start(self):
+        """启动服务器（后台线程）"""
+        def run_server():
+            try:
+                self.server = HTTPServer((self.host, self.port), SnapshotHandler)
+                logger.info(f"快照服务启动: http://{self.host}:{self.port}")
+                self.server.serve_forever()
+            except Exception as e:
+                logger.error(f"快照服务启动失败: {e}")
         
-        app = web.Application()
-        app.router.add_get('/snap/{filename}', self._handle_snap_request)
-        app.router.add_get('/thermal/{filename}', self._handle_thermal_request)
-        
-        self._server = await asyncio.get_running_loop().create_server(
-            web.AppRunner(app).setup(),
-            self.host,
-            self.port
-        )
-        
-        logger.info(f"快照服务已启动: http://{self.host}:{self.port}")
-        return self._server
+        self.thread = threading.Thread(target=run_server, daemon=True)
+        self.thread.start()
+        self.running = True
+        return self
     
-    async def _handle_snap_request(self, request: Request) -> Response:
-        """处理快照请求"""
-        filename = request.match_info['filename']
-        filepath = self.snapshot_dir / f"{filename}.jpg"
-        
-        if filepath.exists():
-            return web.FileResponse(filepath)
-        else:
-            # 返回模拟图片
-            return await self._generate_mock_image(request)
-    
-    async def _handle_thermal_request(self, request: Request) -> Response:
-        """处理热成像请求"""
-        filename = request.match_info['filename']
-        filepath = self.snapshot_dir / f"thermal_{filename}.jpg"
-        
-        if filepath.exists():
-            return web.FileResponse(filepath)
-        else:
-            return await self._generate_mock_image(request)
-    
-    async def _generate_mock_image(self, request: Request) -> Response:
-        """生成模拟图片（开发测试用）"""
-        import io
-        try:
-            from PIL import Image, ImageDraw, ImageFont
-            
-            # 创建模拟图片
-            img = Image.new('RGB', (640, 480), color=(30, 30, 30))
-            draw = ImageDraw.Draw(img)
-            
-            # 添加文字
-            draw.text((200, 200), "SNAPSHOT", fill=(255, 255, 255))
-            draw.text((180, 250), "TEST MODE", fill=(255, 255, 0))
-            
-            # 保存到内存
-            buffer = io.BytesIO()
-            img.save(buffer, format='JPEG')
-            buffer.seek(0)
-            
-            return Response(body=buffer.read(), content_type='image/jpeg')
-        except ImportError:
-            return Response(text="PIL not installed", status=500)
-    
-    def save_snapshot(self, snapshot_id: str, image_data: bytes):
-        """保存快照图片
-        
-        Args:
-            snapshot_id: 快照ID
-            image_data: 图片数据
-        """
-        filepath = self.snapshot_dir / f"{snapshot_id}.jpg"
-        with open(filepath, 'wb') as f:
-            f.write(image_data)
-        logger.info(f"快照已保存: {filepath}")
+    def stop(self):
+        """停止服务器"""
+        if self.server:
+            self.server.shutdown()
+            self.running = False
+            logger.info("快照服务已停止")
     
     def get_snapshot_url(self, snapshot_id: str) -> str:
-        """获取快照URL
-        
-        Args:
-            snapshot_id: 快照ID
-            
-        Returns:
-            快照访问URL
-        """
+        """获取快照URL"""
         return f"http://{self.host}:{self.port}/snap/{snapshot_id}"
 
 
-# 全局单例
-_loop = None
-_snapshot_server = None
-
-
-def get_snapshot_server() -> SnapshotServer:
-    """获取全局快照服务实例"""
-    global _snapshot_server
-    if _snapshot_server is None:
-        _snapshot_server = SnapshotServer()
-    return _snapshot_server
-
-
-async def start_snapshot_server():
-    """启动快照服务"""
-    global _snapshot_server
-    if _snapshot_server is None:
-        _snapshot_server = SnapshotServer()
+async def start_snapshot_server(snapshot_dir: str = "data/snapshots") -> SnapshotServer:
+    """启动快照服务
     
-    await _snapshot_server.start()
-    return _snapshot_server
+    Returns:
+        SnapshotServer实例
+    """
+    server = SnapshotServer(snapshot_dir=snapshot_dir)
+    server.start()
+    await asyncio.sleep(0.5)  # 等待服务器启动
+    return server
 
 
 if __name__ == "__main__":
-    # 测试代码
-    async def test():
-        server = await start_snapshot_server()
-        logger.info(f"快照服务测试: http://localhost:8080/snap/TEST-001")
-        
-        # 保持运行
-        await asyncio.sleep(3600)
+    import argparse
+    parser = argparse.ArgumentParser(description="快照HTTP服务")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--dir", default="data/snapshots")
+    args = parser.parse_args()
     
-    asyncio.run(test())
+    server = SnapshotServer(host=args.host, port=args.port, snapshot_dir=args.dir)
+    server.start()
+    
+    try:
+        while True:
+            asyncio.run(asyncio.sleep(1))
+    except KeyboardInterrupt:
+        server.stop()
