@@ -3,37 +3,36 @@ chcp 65001 >nul
 setlocal enabledelayedexpansion
 
 echo.
-echo Monitor Platform Starting...
+echo ============================================
+echo  Lite3 Monitor Platform - Start Script
+echo ============================================
 echo.
 
 :: Check Python
 python --version >nul 2>&1
 if errorlevel 1 (
     echo ERROR: Python not found
-    echo Please install Python 3.8+: https://www.python.org/downloads/
     pause
     exit /b 1
 )
 
+echo Python version:
 python --version
 echo.
 
-:: Create virtual environment if not exists
-if not exist "venv" (
-    echo Creating virtual environment...
-    python -m venv venv
+:: Activate virtual environment if exists
+if exist "venv\Scripts\activate.bat" (
+    call venv\Scripts\activate.bat
+    echo Virtual environment activated
 )
-
-:: Activate virtual environment
-call venv\Scripts\activate.bat
 
 :: Install dependencies
 echo Installing dependencies...
-pip install -q -r monitor_platform/requirements.txt
+pip install -q -r monitor_platform\requirements.txt 2>nul
 
 echo.
 echo ============================================
-echo Monitor Platform Started Successfully!
+echo  Platform Started Successfully
 echo ============================================
 echo.
 echo   Web Interface:   http://localhost:8000
@@ -43,5 +42,5 @@ echo.
 echo   Press Ctrl+C to stop
 echo.
 
-python monitor_platform/server.py
+python monitor_platform\server.py
 pause

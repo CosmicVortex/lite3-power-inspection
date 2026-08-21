@@ -4,7 +4,7 @@ setlocal enabledelayedexpansion
 
 echo.
 echo ============================================
-echo  绝影Lite3监测平台 - 一键部署脚本
+echo  Lite3 Monitor Platform - Deploy Script
 echo ============================================
 echo.
 
@@ -12,52 +12,54 @@ echo.
 python --version >nul 2>&1
 if errorlevel 1 (
     echo ERROR: Python not found
-    echo Please install Python 3.8+
+    echo Please install Python 3.8+: https://www.python.org/downloads/
     pause
     exit /b 1
 )
 
-echo [1/4] Python检查通过
+echo [1/4] Python check passed
 python --version
 echo.
 
 :: Build Frontend (optional)
 where pnpm >nul 2>&1
 if not errorlevel 1 (
-    echo [2/4] 构建前端...
-    cd frontend
-    pnpm install >nul 2>&1
-    pnpm build
-    cd ..
-    echo ✓ 前端构建完成
+    echo [2/4] Building frontend...
+    if exist "frontend" (
+        cd frontend
+        pnpm install --no-frozen-lockfile 2>nul || pnpm install
+        pnpm build
+        cd ..
+        echo Frontend build completed
+    )
 ) else (
-    echo [2/4] 跳过前端构建 (pnpm未安装)
+    echo [2/4] Skipping frontend build (pnpm not found)
 )
 echo.
 
 :: Install Python dependencies
-echo [3/4] 安装Python依赖...
-if exist requirements.txt (
+echo [3/4] Installing Python dependencies...
+if exist "requirements.txt" (
     pip install -q -r requirements.txt
 )
-if exist monitor_platform\requirements.txt (
+if exist "monitor_platform\requirements.txt" (
     pip install -q -r monitor_platform\requirements.txt
 )
-echo ✓ 依赖安装完成
+echo Dependencies installed
 echo.
 
 :: Start Server
-echo [4/4] 启动服务...
+echo [4/4] Starting server...
 echo.
 echo ============================================
-echo  监测平台启动成功
+echo  Platform started successfully
 echo ============================================
 echo.
-echo   Web界面:   http://localhost:8000
-echo   API文档:   http://localhost:8000/docs
-echo   WebSocket: ws://localhost:8765/ws
+echo   Web Interface:   http://localhost:8000
+echo   API Docs:        http://localhost:8000/docs
+echo   WebSocket:       ws://localhost:8765/ws
 echo.
-echo   按 Ctrl+C 停止服务
+echo   Press Ctrl+C to stop
 echo.
 
 python monitor_platform\server.py
