@@ -12,6 +12,7 @@ from typing import Dict, List, Optional
 from fastapi import FastAPI, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse
 import uvicorn
+import websockets
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -1154,6 +1155,39 @@ body {
 </html>"""
 
 
+
+async def ws_server():
+    """独立的WebSocket服务器（端口8765）"""
+    async def handler(websocket, path=None):
+        """处理WebSocket连接"""
+        connections.append(websocket)
+        logger.info(f"感知主机连接: {websocket.remote_address}")
+        
+        # 发送初始状态
+        await websocket.send_json({"type": "robot_status", "data": robot_status})
+        
+        try:
+            async for message in websocket:
+                try:
+                    data = json.loads(message)
+                    await monitor.process(data, websocket)
+                except json.JSONDecodeError:
+                    logger.warning("收到非JSON消息")
+                except Exception as e:
+                    logger.error(f"处理消息失败: {e}")
+        except Exception as e:
+            logger.error(f"WebSocket处理异常: {e}")
+        finally:
+            if websocket in connections:
+                connections.remove(websocket)
+            logger.info(f"感知主机断开: {websocket.remote_address}")
+    
+    async with websockets.serve(handler, "0.0.0.0", WS_PORT):
+        logger.info(f"WebSocket服务器启动: ws://0.0.0.0:{WS_PORT}")
+        await asyncio.Future()  # 永久运行
+
+
+
 async def main():
     global DASHBOARD_HTML
     if ROBOT_IMAGE_URI:
@@ -1161,10 +1195,19 @@ async def main():
     else:
         DASHBOARD_HTML = DASHBOARD_HTML.replace('__ROBOT_IMAGE__', 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiByPSI0MCIgZmlsbD0iI2RkZCIvPjx0ZXh0IHg9IjUwIiB5PSI2MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSI0MCI+8J+OwDwvdGV4dD48L3N2Zz4=')
     
-    config = uvicorn.Config(app, host="0.0.0.0", port=HTTP_PORT, log_level="info")
-    server = uvicorn.Server(config)
-    logger.info(f"监测平台启动(手柄版): http://0.0.0.0:{HTTP_PORT}")
-    await server.serve()
+    # 启动HTTP服务器
+    http_config = uvicorn.Config(app, host="0.0.0.0", port=HTTP_PORT, log_level="info")
+    http_server = uvicorn.Server(http_config)
+    
+    # 启动WebSocket服务器（并发运行）
+    ws_task = asyncio.create_task(ws_server())
+    
+    logger.info(f"监测平台启动:")
+    logger.info(f"  HTTP服务: http://0.0.0.0:{HTTP_PORT}")
+    logger.info(f"  WebSocket: ws://0.0.0.0:{WS_PORT}")
+    
+    # 并发运行两个服务器
+    await asyncio.gather(http_server.serve(), ws_task)
 
 if __name__ == "__main__":
     asyncio.run(main())
