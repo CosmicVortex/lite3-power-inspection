@@ -86,8 +86,8 @@ async def run_demo(mode: str = DemoMode.SIMULATION, config: dict = None, ws_url:
         forward_video_streams(ws_url or "ws://192.168.1.103:8765/ws")
     )
     
-    # 启动心跳任务
-    heartbeat_task = asyncio.create_task(_send_heartbeat(websocket, body_data))
+    # 启动UDP数据接收和心跳任务
+    udp_task = asyncio.create_task(_receive_udp_and_send(websocket, body_data, udp_controller))
     
     logger.info("所有模块连接成功")
     logger.info("")
@@ -120,24 +120,31 @@ async def run_demo(mode: str = DemoMode.SIMULATION, config: dict = None, ws_url:
         logger.error(f"演示过程中出错: {e}")
     finally:
         # 停止后台任务
-        heartbeat_task.cancel()
+        udp_task.cancel()
         video_task.cancel()
         
         # 清理资源
         await _cleanup(udp_controller, ptz_controller, websocket, snapshot_server)
 
 
-async def _send_heartbeat(websocket: WebSocketGateway, body_data: RealBodyData):
-    """定期发送心跳包"""
+async def _receive_udp_and_send(websocket: WebSocketGateway, body_data: RealBodyData, udp_controller: UDPMotionController):
+    """接收UDP数据并发送到监测平台"""
     try:
         while True:
-            await asyncio.sleep(1)  # 每秒发送一次
+            await asyncio.sleep(0.1)  # 10Hz轮询
+            
+            # 从UDP接收真实数据
+            if udp_controller.is_connected():
+                body_data.update_from_udp(udp_controller)
+            
+            # 发送心跳
             heartbeat = body_data.simulate_heartbeat()
             await websocket.send_message(heartbeat["type"], heartbeat["payload"])
+            
     except asyncio.CancelledError:
         pass
     except Exception as e:
-        logger.debug(f"心跳发送失败: {e}")
+        logger.debug(f"数据接收失败: {e}")
 
 
 async def _demo_stand_up(controller: UDPMotionController, body_data: RealBodyData):

@@ -215,3 +215,44 @@ if __name__ == "__main__":
               f"电量={status['battery']:.1f}%, 温度={status['cpu_temp']:.1f}℃")
     
     print("\n✓ 真实本体数据生成测试通过")
+
+    def update_from_udp(self, udp_controller):
+        """从UDP控制器更新本体数据（真实数据）
+        
+        Args:
+            udp_controller: UDPMotionController实例
+        """
+        if not udp_controller or not udp_controller.is_connected():
+            return
+        
+        # 更新电池（来自UDP数据）
+        self.battery = udp_controller.robot_state.battery_level
+        
+        # 更新位置（来自UDP数据）
+        pos = udp_controller.robot_state.pos_world
+        self.position["x"] = pos[0]
+        self.position["y"] = pos[1]
+        self.position["z"] = max(0.0, pos[2])
+        
+        # 更新IMU角度（来自UDP数据）
+        rpy = udp_controller.robot_state.rpy
+        self.imu["roll"] = rpy[0]
+        self.imu["pitch"] = rpy[1]
+        self.imu["yaw"] = rpy[2]
+        
+        # 更新超声波
+        self.ultrasound = udp_controller.robot_state.ultrasound
+        
+        # 更新状态
+        self.status = self._state_map.get(udp_controller.robot_state.robot_basic_state, "idle")
+    
+    _state_map = {
+        0: "stand",
+        1: "sit",
+        2: "standing_up",
+        3: "standing_down",
+        4: "walking",
+        5: "running",
+        6: "hurtling",
+        7: "dancing",
+    }
