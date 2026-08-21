@@ -120,7 +120,9 @@ python3 -m venv venv && source venv/bin/activate
 pip install fastapi uvicorn websockets pydantic
 
 # 3. 启动监测平台
-python3 scripts/start_monitor.py
+./scripts/start_monitor.sh  # Linux/macOS
+# 或
+call scripts\start_monitor.bat  # Windows
 ```
 
 **访问地址**: http://localhost:8000
