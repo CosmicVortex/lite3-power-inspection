@@ -2,9 +2,6 @@
 # Monitor Platform Startup Script (Portable)
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
-
 echo ""
 echo "Monitor Platform Starting..."
 echo ""
@@ -31,7 +28,7 @@ source venv/bin/activate
 
 # Install dependencies
 echo "Installing dependencies..."
-pip install -q -r monitor_platform/requirements.txt
+pip install -q -r requirements.txt
 
 # Start service
 echo ""
@@ -46,4 +43,4 @@ echo ""
 echo "  Press Ctrl+C to stop"
 echo ""
 
-python3 monitor_platform/server.py
+python3 server.py

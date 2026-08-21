@@ -29,7 +29,7 @@ call venv\Scripts\activate.bat
 
 :: Install dependencies
 echo Installing dependencies...
-pip install -q -r monitor_platform\requirements.txt
+pip install -q -r requirements.txt
 
 echo.
 echo ============================================
@@ -38,10 +38,10 @@ echo ============================================
 echo.
 echo   Web Interface:   http://localhost:8000
 echo   API Docs:        http://localhost:8000/docs
-echo   WebSocket:       ws://localhost:8765
+echo   WebSocket:       ws://localhost:8765/ws
 echo.
 echo   Press Ctrl+C to stop
 echo.
 
-python monitor_platform/server.py
+python server.py
 pause

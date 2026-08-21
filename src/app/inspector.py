@@ -90,7 +90,7 @@ class Inspector:
             },
             "communication": {
                 "websocket": {
-                    "server_url": "ws://MONITOR_HOST:8765/ws"  # TODO: 部署时替换为监测平台实际IP,
+                    "server_url": "ws://MONITOR_HOST:8765/ws",
                     "reconnect_interval": 5.0
                 }
             }
