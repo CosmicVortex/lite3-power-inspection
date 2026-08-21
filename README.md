@@ -248,8 +248,18 @@ lite3-power-inspection/
 │   └── storage/            # 存储模块
 ├── scripts/                # 脚本
 │   ├── run_demo.py         # 演示启动
-│   └── offline_install.sh  # 离线安装
-├── deliverables/           # 部署包
+│   ├── demo_12min.py       # 12分钟演示流程
+│   ├── deploy_oneclick.py  # 一键部署
+│   ├── detect_environment.py  # 环境检测
+│   ├── gather_system_info.py  # 系统信息采集
+│   ├── package_offline.py  # 打包脚本
+│   ├── offline_install.sh  # Linux离线安装
+│   ├── offline_install.bat  # Windows离线安装
+│   ├── start_monitor.py    # 监测平台启动(Python)
+│   ├── start_monitor.bat   # 监测平台启动(Windows)
+│   ├── start_monitor.sh    # 监测平台启动(Linux)
+│   └── run_diagnostic.sh   # 诊断脚本
+├── deliverables/           # 部署包（本地生成，已排除git）
 └── docs/                   # 文档
 ```
 
