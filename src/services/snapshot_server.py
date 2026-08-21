@@ -8,7 +8,8 @@
 
 import os
 import asyncio
-import aiohttp.web as web
+# 使用aiohttp.web，需要安装: pip install aiohttp
+# 或使用http.server替代
 from pathlib import Path
 from loguru import logger
 
@@ -51,7 +52,7 @@ class SnapshotServer:
         logger.info(f"快照服务已启动: http://{self.host}:{self.port}")
         return self._server
     
-    async def _handle_snap_request(self, request: web.Request) -> web.Response:
+    async def _handle_snap_request(self, request: Request) -> Response:
         """处理快照请求"""
         filename = request.match_info['filename']
         filepath = self.snapshot_dir / f"{filename}.jpg"
@@ -62,7 +63,7 @@ class SnapshotServer:
             # 返回模拟图片
             return await self._generate_mock_image(request)
     
-    async def _handle_thermal_request(self, request: web.Request) -> web.Response:
+    async def _handle_thermal_request(self, request: Request) -> Response:
         """处理热成像请求"""
         filename = request.match_info['filename']
         filepath = self.snapshot_dir / f"thermal_{filename}.jpg"
@@ -72,7 +73,7 @@ class SnapshotServer:
         else:
             return await self._generate_mock_image(request)
     
-    async def _generate_mock_image(self, request: web.Request) -> web.Response:
+    async def _generate_mock_image(self, request: Request) -> Response:
         """生成模拟图片（开发测试用）"""
         import io
         try:
@@ -91,9 +92,9 @@ class SnapshotServer:
             img.save(buffer, format='JPEG')
             buffer.seek(0)
             
-            return web.Response(body=buffer.read(), content_type='image/jpeg')
+            return Response(body=buffer.read(), content_type='image/jpeg')
         except ImportError:
-            return web.Response(text="PIL not installed", status=500)
+            return Response(text="PIL not installed", status=500)
     
     def save_snapshot(self, snapshot_id: str, image_data: bytes):
         """保存快照图片
