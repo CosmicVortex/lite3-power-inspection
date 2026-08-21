@@ -1,24 +1,74 @@
 #!/usr/bin/env python3
 """
-绝影Lite3 监测平台 - Ghost CMS Admin风格界面
-包含：登录界面 + 左侧导航栏 + 顶部Header + 卡片布局
+绝影Lite3 监测平台 - Ghost CMS Admin风格界面 V3
+功能：登录 + 左侧导航 + 视频流(可见光/热成像) + 云台控制 + 温度监测 + WebSocket通信
 """
 
-import asyncio, json, time, logging, struct, socket, base64
+import asyncio, json, time, logging, struct, socket, base64, io, os
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
-from fastapi import FastAPI, WebSocket
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, WebSocket, Request, HTTPException
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import websockets
+import cv2
+import numpy as np
+import aiohttp
+from PIL import Image
+import requests
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 WS_PORT, HTTP_PORT = 8765, 8000
 MOTION_HOST, MOTION_PORT = "192.168.1.103", 43893
+PTZ_BASE_URL = "http://192.168.1.108"
+PTZ_USER, PTZ_PASS = "admin", "123456"
+
+# RTSP流地址
+RTSP_URLS = {
+    "visible_main": "rtsp://admin:123456@192.168.1.108:554/id=1&type=0",
+    "visible_sub": "rtsp://admin:123456@192.168.1.108:554/id=1&type=1",
+    "thermal": "rtsp://admin:123456@192.168.1.108:554/id=2&type=0"
+}
+
+# 全局状态
+connections: List[WebSocket] = []
+inspections: List[Dict] = []
+alerts: List[Dict] = []
+robot_status = {
+    "battery": 68, "cpu_temp": 35.0, "gpu_load": 0, "memory_usage": 45,
+    "status": "idle", "position": {"x": 0.0, "y": 0.0},
+    "waypoint": "WP001", "total_waypoints": 5, "completed_waypoints": 0,
+    "endurance_hours": 1.8, 
+    "ptz": {"yaw": 0.0, "pitch": -30.0, "zoom": 1, "connected": False},
+    "temperature": {"current": 35.0, "max": 35.0, "warn": False, "critical": False}
+}
+motion_sock = None
+key_state = {"forward": False, "backward": False, "left": False, "right": False,
+             "turn_left": False, "turn_right": False, "stand": False}
+
+# 视频流
+video_captures = {}
+video_cache = {"visible_main": None, "visible_sub": None, "thermal": None}
+video_frame_times = {"visible_main": 0, "visible_sub": 0, "thermal": 0}
+
+# 云台会话
+ptz_session = None
+ptz_auth = None
+
+# 温度监测
+temperature_data = {"current": 35.0, "max": 35.0, "history": []}
 
 # ========== 官方协议指令码 ==========
 CMD_FORWARD = 0x21010130
@@ -30,20 +80,7 @@ CMD_HOME = 0x21010C05
 CMD_MOVE_MODE = 0x21010D06
 CMD_STAND_MODE = 0x21010D05
 
-connections: List[WebSocket] = []
-inspections: List[Dict] = []
-alerts: List[Dict] = []
-robot_status = {
-    "battery": 68, "cpu_temp": 35.0, "gpu_load": 0, "memory_usage": 45,
-    "status": "idle", "position": {"x": 0.0, "y": 0.0},
-    "waypoint": "WP001", "total_waypoints": 5, "completed_waypoints": 0,
-    "endurance_hours": 1.8
-}
-motion_sock = None
-key_state = {"forward": False, "backward": False, "left": False, "right": False,
-             "turn_left": False, "turn_right": False, "stand": False}
-
-# ========== Ghost CMS Admin风格HTML ==========
+# ========== Ghost CMS Admin HTML ==========
 GHOST_ADMIN_HTML = """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -51,7 +88,6 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>绝影Lite3 · 电力巡检监控中心</title>
     <style>
-        /* ========== Ghost Design System ========== */
         :root {
             --ghost-black: #15171A;
             --ghost-dark: #222429;
@@ -61,24 +97,20 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             --ghost-pale: #D4D7DC;
             --ghost-palest: #F1F3F5;
             --ghost-white: #FFFFFF;
-            
             --primary: #FF6B35;
             --primary-hover: #E55A28;
             --success: #00C853;
             --warning: #FFB300;
             --danger: #FF3D00;
-            
             --space-xs: 4px;
             --space-sm: 8px;
             --space-md: 16px;
             --space-lg: 24px;
             --space-xl: 32px;
             --space-2xl: 48px;
-            
             --radius-sm: 4px;
             --radius-md: 8px;
             --radius-lg: 12px;
-            
             --shadow-sm: 0 1px 3px rgba(0,0,0,0.12);
             --shadow-md: 0 4px 6px rgba(0,0,0,0.1);
         }
@@ -92,7 +124,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             min-height: 100vh;
         }
         
-        /* ========== 登录界面 ========== */
+        /* 登录界面 */
         .login-page {
             min-height: 100vh;
             display: flex;
@@ -150,9 +182,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             margin-bottom: var(--space-lg);
         }
         
-        .form-group {
-            margin-bottom: var(--space-lg);
-        }
+        .form-group { margin-bottom: var(--space-lg); }
         
         .form-label {
             display: block;
@@ -190,9 +220,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             transition: all 0.15s ease;
         }
         
-        .btn-login:hover {
-            background: var(--primary-hover);
-        }
+        .btn-login:hover { background: var(--primary-hover); }
         
         .login-footer {
             text-align: center;
@@ -201,15 +229,9 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             color: var(--ghost-light);
         }
         
-        /* ========== 主界面 ========== */
-        .app-container {
-            display: none;
-            min-height: 100vh;
-        }
-        
-        .app-container.visible {
-            display: flex;
-        }
+        /* 主界面 */
+        .app-container { display: none; min-height: 100vh; }
+        .app-container.visible { display: flex; }
         
         /* 左侧导航栏 */
         .sidebar {
@@ -253,15 +275,9 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             font-weight: 600;
         }
         
-        .sidebar-nav {
-            flex: 1;
-            padding: var(--space-md) 0;
-            overflow-y: auto;
-        }
+        .sidebar-nav { flex: 1; padding: var(--space-md) 0; overflow-y: auto; }
         
-        .nav-section {
-            margin-bottom: var(--space-lg);
-        }
+        .nav-section { margin-bottom: var(--space-lg); }
         
         .nav-section-title {
             padding: var(--space-sm) var(--space-xl);
@@ -296,10 +312,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             padding-left: calc(var(--space-xl) - 3px);
         }
         
-        .nav-item-icon {
-            width: 20px;
-            text-align: center;
-        }
+        .nav-item-icon { width: 20px; text-align: center; }
         
         .nav-item-badge {
             margin-left: auto;
@@ -335,11 +348,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             font-weight: 600;
         }
         
-        .user-name {
-            flex: 1;
-            font-size: 13px;
-            color: var(--ghost-white);
-        }
+        .user-name { flex: 1; font-size: 13px; color: var(--ghost-white); }
         
         .btn-logout {
             background: none;
@@ -350,9 +359,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             padding: var(--space-sm);
         }
         
-        .btn-logout:hover {
-            color: var(--ghost-white);
-        }
+        .btn-logout:hover { color: var(--ghost-white); }
         
         /* 主内容区 */
         .main-wrapper {
@@ -391,14 +398,8 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             color: var(--ghost-light);
         }
         
-        .breadcrumb-separator {
-            color: var(--ghost-pale);
-        }
-        
-        .breadcrumb-current {
-            color: var(--ghost-dark);
-            font-weight: 500;
-        }
+        .breadcrumb-separator { color: var(--ghost-pale); }
+        .breadcrumb-current { color: var(--ghost-dark); font-weight: 500; }
         
         .header-right {
             display: flex;
@@ -459,9 +460,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             overflow-y: auto;
         }
         
-        .page-header {
-            margin-bottom: var(--space-xl);
-        }
+        .page-header { margin-bottom: var(--space-xl); }
         
         .page-title {
             font-size: 24px;
@@ -475,7 +474,80 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             color: var(--ghost-light);
         }
         
-        /* 卡片网格 */
+        /* 视频流区域 */
+        .video-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: var(--space-lg);
+            margin-bottom: var(--space-xl);
+        }
+        
+        .video-card {
+            background: var(--ghost-white);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--ghost-pale);
+            overflow: hidden;
+        }
+        
+        .video-header {
+            padding: var(--space-md) var(--space-lg);
+            border-bottom: 1px solid var(--ghost-palest);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .video-title {
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--ghost-light);
+        }
+        
+        .video-status {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: #ECFDF5;
+            color: var(--success);
+        }
+        
+        .video-status.offline { background: #FEF2F2; color: var(--danger); }
+        
+        .video-feed {
+            width: 100%;
+            height: 240px;
+            background: var(--ghost-dark);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        
+        .video-feed img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .video-overlay {
+            position: absolute;
+            bottom: var(--space-md);
+            left: var(--space-md);
+            display: flex;
+            gap: var(--space-sm);
+        }
+        
+        .video-tag {
+            padding: 2px 8px;
+            background: rgba(0,0,0,0.6);
+            color: white;
+            font-size: 11px;
+            border-radius: 4px;
+        }
+        
+        /* 数据卡片 */
         .cards-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -527,11 +599,8 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
         .card-icon.blue { background: #E3F2FD; }
         .card-icon.red { background: #FFEbee; }
         
-        .card-body {
-            padding: var(--space-lg);
-        }
+        .card-body { padding: var(--space-lg); }
         
-        /* 数据行 */
         .data-row {
             display: flex;
             justify-content: space-between;
@@ -540,9 +609,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             border-bottom: 1px solid var(--ghost-palest);
         }
         
-        .data-row:last-child {
-            border-bottom: none;
-        }
+        .data-row:last-child { border-bottom: none; }
         
         .data-label {
             font-size: 13px;
@@ -558,58 +625,31 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
         .data-value.warning { color: var(--warning); }
         .data-value.danger { color: var(--danger); }
         
-        /* 电池环形 */
-        .battery-container {
+        /* 温度仪表 */
+        .temp-gauge {
             display: flex;
             flex-direction: column;
             align-items: center;
             gap: var(--space-md);
         }
         
-        .battery-ring {
-            position: relative;
-            width: 120px;
-            height: 120px;
-        }
-        
-        .battery-ring svg {
-            transform: rotate(-90deg);
-        }
-        
-        .battery-ring-bg {
-            fill: none;
-            stroke: var(--ghost-palest);
-            stroke-width: 8;
-        }
-        
-        .battery-ring-fill {
-            fill: none;
-            stroke: var(--success);
-            stroke-width: 8;
-            stroke-linecap: round;
-            transition: stroke-dashoffset 0.8s ease;
-        }
-        
-        .battery-center {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            text-align: center;
-        }
-        
-        .battery-percent {
-            font-size: 28px;
+        .temp-display {
+            font-size: 48px;
             font-weight: 700;
             color: var(--ghost-black);
             line-height: 1;
         }
         
-        .battery-label {
-            font-size: 11px;
+        .temp-display.warning { color: var(--warning); }
+        .temp-display.danger { color: var(--danger); }
+        
+        .temp-status {
+            font-size: 13px;
             color: var(--ghost-light);
-            margin-top: var(--space-xs);
         }
+        
+        .temp-status.warn { color: var(--warning); }
+        .temp-status.critical { color: var(--danger); }
         
         /* D-Pad控制器 */
         .dpad {
@@ -642,15 +682,8 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             color: white;
         }
         
-        .dpad-btn:active {
-            transform: scale(0.95);
-        }
-        
-        .dpad-btn.empty {
-            background: transparent;
-            border: none;
-            cursor: default;
-        }
+        .dpad-btn:active { transform: scale(0.95); }
+        .dpad-btn.empty { background: transparent; border: none; cursor: default; }
         
         .action-buttons {
             display: flex;
@@ -671,9 +704,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             transition: all 0.15s ease;
         }
         
-        .action-btn:hover {
-            border-color: var(--ghost-mid);
-        }
+        .action-btn:hover { border-color: var(--ghost-mid); }
         
         .action-btn.primary {
             background: var(--primary);
@@ -693,10 +724,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             overflow-y: auto;
         }
         
-        .alert-list::-webkit-scrollbar {
-            width: 4px;
-        }
-        
+        .alert-list::-webkit-scrollbar { width: 4px; }
         .alert-list::-webkit-scrollbar-thumb {
             background: var(--ghost-pale);
             border-radius: 2px;
@@ -712,10 +740,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             transition: all 0.15s ease;
         }
         
-        .alert-item:hover {
-            background: var(--ghost-pale);
-        }
-        
+        .alert-item:hover { background: var(--ghost-pale); }
         .alert-item.warning { background: #FFF8E1; }
         .alert-item.danger { background: #FFEBEE; }
         
@@ -733,10 +758,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
         .alert-icon.warning { background: var(--warning); color: white; }
         .alert-icon.danger { background: var(--danger); color: white; }
         
-        .alert-content {
-            flex: 1;
-        }
-        
+        .alert-content { flex: 1; }
         .alert-message {
             font-size: 13px;
             color: var(--ghost-dark);
@@ -775,31 +797,17 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
         
         /* 响应式 */
         @media (max-width: 1024px) {
-            .sidebar {
-                width: 60px;
-            }
-            .sidebar-logo-text, .nav-item-text, .nav-section-title, .nav-item-badge {
-                display: none;
-            }
-            .nav-item {
-                justify-content: center;
-                padding: var(--space-md);
-            }
-            .main-wrapper {
-                margin-left: 60px;
-            }
+            .sidebar { width: 60px; }
+            .sidebar-logo-text, .nav-item-text, .nav-section-title, .nav-item-badge { display: none; }
+            .nav-item { justify-content: center; padding: var(--space-md); }
+            .main-wrapper { margin-left: 60px; }
         }
         
         @media (max-width: 768px) {
-            .sidebar {
-                display: none;
-            }
-            .main-wrapper {
-                margin-left: 0;
-            }
-            .cards-grid {
-                grid-template-columns: 1fr;
-            }
+            .sidebar { display: none; }
+            .main-wrapper { margin-left: 0; }
+            .cards-grid { grid-template-columns: 1fr; }
+            .video-grid { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -872,6 +880,10 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
                         <span class="nav-item-icon">📹</span>
                         <span class="nav-item-text">视频流</span>
                     </a>
+                    <a class="nav-item" href="#">
+                        <span class="nav-item-icon">🎯</span>
+                        <span class="nav-item-text">云台控制</span>
+                    </a>
                 </div>
                 
                 <div class="nav-section">
@@ -927,6 +939,37 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
                     <p class="page-subtitle">绝影Lite3专业版 · 智能电力巡检系统</p>
                 </div>
                 
+                <!-- 视频流区域 -->
+                <div class="video-grid">
+                    <div class="video-card">
+                        <div class="video-header">
+                            <span class="video-title">可见光（主）</span>
+                            <span class="video-status" id="visibleMainStatus">● 在线</span>
+                        </div>
+                        <div class="video-feed">
+                            <img id="visibleMainImg" src="/api/video/visible_main" alt="可见光主画面">
+                            <div class="video-overlay">
+                                <span class="video-tag">CAM-01</span>
+                                <span class="video-tag" id="visibleMainFps">30 FPS</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="video-card">
+                        <div class="video-header">
+                            <span class="video-title">热成像</span>
+                            <span class="video-status" id="thermalStatus">● 在线</span>
+                        </div>
+                        <div class="video-feed">
+                            <img id="thermalImg" src="/api/video/thermal" alt="热成像画面">
+                            <div class="video-overlay">
+                                <span class="video-tag">THERMAL</span>
+                                <span class="video-tag" id="thermalTemp">35.0°C</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- 巡检进度 -->
                 <div style="background: var(--ghost-white); border-radius: var(--radius-lg); border: 1px solid var(--ghost-pale); padding: var(--space-lg); margin-bottom: var(--space-xl);">
                     <div style="display: flex; justify-content: space-between; margin-bottom: var(--space-sm);">
@@ -968,11 +1011,39 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
                         </div>
                     </div>
                     
+                    <!-- 温度监测 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-title">温度监测</span>
+                            <div class="card-icon green">🌡️</div>
+                        </div>
+                        <div class="card-body">
+                            <div class="temp-gauge">
+                                <div class="temp-display" id="tempDisplay">35.0°C</div>
+                                <div class="temp-status" id="tempStatus">正常</div>
+                                <div style="margin-top: var(--space-md);">
+                                    <div class="data-row">
+                                        <span class="data-label">最高温度</span>
+                                        <span class="data-value" id="maxTempValue">35.0°C</span>
+                                    </div>
+                                    <div class="data-row">
+                                        <span class="data-label">预警阈值</span>
+                                        <span class="data-value">45.0°C</span>
+                                    </div>
+                                    <div class="data-row">
+                                        <span class="data-label">告警阈值</span>
+                                        <span class="data-value">50.0°C</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <!-- 系统状态 -->
                     <div class="card">
                         <div class="card-header">
                             <span class="card-title">系统状态</span>
-                            <div class="card-icon green">📊</div>
+                            <div class="card-icon blue">📊</div>
                         </div>
                         <div class="card-body" style="padding: 0;">
                             <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
@@ -1008,6 +1079,32 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
                             <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
                                 <span class="data-label">运行状态</span>
                                 <span class="data-value" id="statusValue">空闲</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 云台状态 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-title">云台状态</span>
+                            <div class="card-icon green">🎯</div>
+                        </div>
+                        <div class="card-body" style="padding: 0;">
+                            <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
+                                <span class="data-label">偏航角</span>
+                                <span class="data-value" id="ptzYawValue">0.0°</span>
+                            </div>
+                            <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
+                                <span class="data-label">俯仰角</span>
+                                <span class="data-value" id="ptzPitchValue">-30.0°</span>
+                            </div>
+                            <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
+                                <span class="data-label">变倍</span>
+                                <span class="data-value" id="ptzZoomValue">1x</span>
+                            </div>
+                            <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
+                                <span class="data-label">连接状态</span>
+                                <span class="data-value" id="ptzStatusValue" style="color: var(--success);">已连接</span>
                             </div>
                         </div>
                     </div>
@@ -1069,11 +1166,11 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
             
-            // 简单验证（演示用）
             if (username && password) {
                 document.getElementById('loginPage').style.display = 'none';
                 document.getElementById('appContainer').classList.add('visible');
                 connect();
+                startVideoRefresh();
             }
         }
         
@@ -1144,6 +1241,40 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
                 const total = status.total_waypoints || 5;
                 document.getElementById('progressText').textContent = `${completed} / ${total}`;
                 document.getElementById('progressFill').style.width = `${(completed/total)*100}%`;
+                
+                // 云台状态
+                if (status.ptz) {
+                    document.getElementById('ptzYawValue').textContent = (status.ptz.yaw || 0).toFixed(1) + '°';
+                    document.getElementById('ptzPitchValue').textContent = (status.ptz.pitch || -30).toFixed(1) + '°';
+                    document.getElementById('ptzZoomValue').textContent = (status.ptz.zoom || 1) + 'x';
+                    const ptzConnected = status.ptz.connected;
+                    const ptzStatusEl = document.getElementById('ptzStatusValue');
+                    ptzStatusEl.textContent = ptzConnected ? '已连接' : '未连接';
+                    ptzStatusEl.style.color = ptzConnected ? 'var(--success)' : 'var(--danger)';
+                }
+                
+                // 温度状态
+                if (status.temperature) {
+                    const temp = status.temperature.current || 35;
+                    const tempEl = document.getElementById('tempDisplay');
+                    tempEl.textContent = temp.toFixed(1) + '°C';
+                    tempEl.className = 'temp-display' + (temp >= 50 ? ' danger' : temp >= 45 ? ' warning' : '');
+                    
+                    const tempStatusEl = document.getElementById('tempStatus');
+                    if (temp >= 50) {
+                        tempStatusEl.textContent = '严重告警';
+                        tempStatusEl.className = 'temp-status critical';
+                    } else if (temp >= 45) {
+                        tempStatusEl.textContent = '预警';
+                        tempStatusEl.className = 'temp-status warn';
+                    } else {
+                        tempStatusEl.textContent = '正常';
+                        tempStatusEl.className = 'temp-status';
+                    }
+                    
+                    document.getElementById('maxTempValue').textContent = (status.temperature.max || 35).toFixed(1) + '°C';
+                    document.getElementById('thermalTemp').textContent = temp.toFixed(1) + '°C';
+                }
             } else if (data.type === 'alert') {
                 addAlert(data.data);
             }
@@ -1184,6 +1315,18 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
         
         function fetchDemo() {
             fetch('/api/demo', { method: 'POST' });
+        }
+        
+        // 视频刷新
+        let videoRefreshInterval = null;
+        
+        function startVideoRefresh() {
+            // 每秒刷新一次视频截图
+            videoRefreshInterval = setInterval(() => {
+                const timestamp = Date.now();
+                document.getElementById('visibleMainImg').src = `/api/video/visible_main?t=${timestamp}`;
+                document.getElementById('thermalImg').src = `/api/video/thermal?t=${timestamp}`;
+            }, 1000);
         }
         
         // 键盘控制
@@ -1334,8 +1477,200 @@ async def get_robot():
     return robot_status
 
 
+@app.get("/api/video/{stream_name}")
+async def get_video_frame_endpoint(stream_name: str):
+    """获取单帧视频"""
+    if stream_name not in RTSP_URLS:
+        raise HTTPException(status_code=404, detail="Stream not found")
+    
+    # 从缓存获取或启动流
+    if stream_name not in video_captures:
+        try:
+            cap = cv2.VideoCapture(RTSP_URLS[stream_name])
+            if cap.isOpened():
+                video_captures[stream_name] = cap
+                logger.info(f"视频流启动: {stream_name}")
+            else:
+                raise HTTPException(status_code=503, detail="无法打开视频流")
+        except Exception as e:
+            logger.error(f"视频流启动失败 {stream_name}: {e}")
+            raise HTTPException(status_code=503, detail=str(e))
+    
+    cap = video_captures[stream_name]
+    ret, frame = cap.read()
+    
+    if not ret or frame is None:
+        raise HTTPException(status_code=503, detail="无法读取视频帧")
+    
+    success, encoded_img = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    if not success:
+        raise HTTPException(status_code=500, detail="编码失败")
+    
+    return StreamingResponse(io.BytesIO(encoded_img.tobytes()), media_type="image/jpeg")
+
+
+@app.post("/api/ptz/login")
+async def ptz_login_endpoint():
+    """云台登录"""
+    global ptz_session, ptz_auth
+    
+    try:
+        url = f"{PTZ_BASE_URL}/merlin/Login.cgi"
+        params = {"Type": "WEB", "Expires": "30"}
+        resp = requests.get(url, params=params, auth=(PTZ_USER, PTZ_PASS), timeout=5)
+        
+        if resp.status_code == 200:
+            ptz_session = resp.text.strip()
+            ptz_auth = (PTZ_USER, PTZ_PASS)
+            robot_status["ptz"]["connected"] = True
+            return {"success": True, "connected": True}
+        else:
+            return {"success": False, "connected": False}
+    except Exception as e:
+        logger.error(f"云台登录失败: {e}")
+        return {"success": False, "connected": False}
+
+
+@app.post("/api/ptz/logout")
+async def ptz_logout_endpoint():
+    """云台登出"""
+    global ptz_session, ptz_auth
+    
+    try:
+        url = f"{PTZ_BASE_URL}/merlin/Logout.cgi"
+        resp = requests.get(url, auth=ptz_auth, timeout=5)
+        ptz_session = None
+        ptz_auth = None
+        robot_status["ptz"]["connected"] = False
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"云台登出失败: {e}")
+        return {"success": False}
+
+
+@app.post("/api/ptz/set_angle")
+async def ptz_set_angle_endpoint(yaw: float = None, pitch: float = None, zoom: int = None):
+    """设置云台角度"""
+    global ptz_session, ptz_auth
+    
+    if not ptz_session:
+        login_resp = await ptz_login_endpoint()
+        if not login_resp["success"]:
+            return {"success": False}
+    
+    try:
+        url = f"{PTZ_BASE_URL}/merlin/SetPtzangle.cgi"
+        data = {"Angle": {}}
+        if yaw is not None:
+            data["Angle"]["yaw"] = max(-280, min(280, yaw))
+        if pitch is not None:
+            data["Angle"]["pitch"] = max(-115, min(40, pitch))
+        if zoom is not None:
+            data["Angle"]["zoom"] = max(1, min(20, zoom))
+        
+        resp = requests.post(url, json=data, auth=ptz_auth, timeout=5)
+        
+        if resp.status_code == 200:
+            if yaw is not None:
+                robot_status["ptz"]["yaw"] = yaw
+            if pitch is not None:
+                robot_status["ptz"]["pitch"] = pitch
+            if zoom is not None:
+                robot_status["ptz"]["zoom"] = zoom
+            return {"success": True, "ptz": robot_status["ptz"]}
+        else:
+            return {"success": False}
+    except Exception as e:
+        logger.error(f"云台角度设置失败: {e}")
+        return {"success": False}
+
+
+@app.get("/api/ptz/state")
+async def ptz_get_state_endpoint():
+    """获取云台状态"""
+    global ptz_session, ptz_auth
+    
+    if not ptz_session:
+        login_resp = await ptz_login_endpoint()
+        if not login_resp["success"]:
+            return {"success": False}
+    
+    try:
+        url = f"{PTZ_BASE_URL}/merlin/GetFlyStateInfo.cgi"
+        resp = requests.get(url, auth=ptz_auth, timeout=5)
+        
+        if resp.status_code == 200:
+            state = resp.json()
+            robot_status["ptz"]["yaw"] = state.get("Angle", {}).get("yaw", 0)
+            robot_status["ptz"]["pitch"] = state.get("Angle", {}).get("pitch", 0)
+            robot_status["ptz"]["zoom"] = state.get("Zoom", {}).get("zoom", 1)
+            return {"state": state, "ptz": robot_status["ptz"]}
+        else:
+            return {"success": False}
+    except Exception as e:
+        logger.error(f"获取云台状态失败: {e}")
+        return {"success": False}
+
+
+@app.get("/api/temperature")
+async def get_temperature_endpoint():
+    """获取温度数据"""
+    global temperature_data
+    
+    # 模拟温度数据
+    import random
+    base_temp = 35.0
+    variation = random.uniform(-3, 3)
+    current_temp = base_temp + variation
+    
+    temperature_data["current"] = round(current_temp, 1)
+    temperature_data["max"] = max(temperature_data["max"], current_temp)
+    temperature_data["history"].append({
+        "time": datetime.now().isoformat(),
+        "temp": current_temp
+    })
+    
+    if len(temperature_data["history"]) > 100:
+        temperature_data["history"] = temperature_data["history"][-100:]
+    
+    # 更新告警状态
+    warn_threshold = 45.0
+    critical_threshold = 50.0
+    
+    robot_status["temperature"]["current"] = current_temp
+    robot_status["temperature"]["max"] = temperature_data["max"]
+    robot_status["temperature"]["warn"] = current_temp >= warn_threshold
+    robot_status["temperature"]["critical"] = current_temp >= critical_threshold
+    
+    # 发送告警
+    if current_temp >= critical_threshold and not robot_status["temperature"].get("last_critical"):
+        alert_msg = f"温度告警（严重）: {current_temp}°C 超过阈值 {critical_threshold}°C"
+        alerts.append({"message": alert_msg, "timestamp": datetime.now().isoformat(),
+                      "ack": False, "level": "danger"})
+        robot_status["temperature"]["last_critical"] = True
+    elif current_temp >= warn_threshold and not robot_status["temperature"].get("last_warn"):
+        alert_msg = f"温度告警（预警）: {current_temp}°C 超过阈值 {warn_threshold}°C"
+        alerts.append({"message": alert_msg, "timestamp": datetime.now().isoformat(),
+                      "ack": False, "level": "warning"})
+        robot_status["temperature"]["last_warn"] = True
+    else:
+        robot_status["temperature"].pop("last_critical", None)
+        robot_status["temperature"].pop("last_warn", None)
+    
+    return {
+        "current": current_temp,
+        "max": temperature_data["max"],
+        "warn_threshold": warn_threshold,
+        "critical_threshold": critical_threshold,
+        "warn": current_temp >= warn_threshold,
+        "critical": current_temp >= critical_threshold,
+        "history": temperature_data["history"][-10:]
+    }
+
+
 @app.post("/api/demo")
 async def demo():
+    """演示模式"""
     import random
     robot_status.update({
         "battery": random.randint(60, 95),
@@ -1365,9 +1700,35 @@ async def main():
     
     ws_task = asyncio.create_task(ws_server())
     
+    # 启动视频流
+    for name, url in RTSP_URLS.items():
+        try:
+            cap = cv2.VideoCapture(url)
+            if cap.isOpened():
+                video_captures[name] = cap
+                logger.info(f"视频流启动成功: {name}")
+            else:
+                logger.warning(f"无法打开视频流: {name}")
+        except Exception as e:
+            logger.error(f"启动视频流失败 {name}: {e}")
+    
+    # 云台登录
+    try:
+        url = f"{PTZ_BASE_URL}/merlin/Login.cgi"
+        params = {"Type": "WEB", "Expires": "30"}
+        resp = requests.get(url, params=params, auth=(PTZ_USER, PTZ_PASS), timeout=5)
+        if resp.status_code == 200:
+            ptz_session = resp.text.strip()
+            ptz_auth = (PTZ_USER, PTZ_PASS)
+            robot_status["ptz"]["connected"] = True
+            logger.info("云台登录成功")
+    except Exception as e:
+        logger.warning(f"云台登录失败（将继续运行）: {e}")
+    
     logger.info(f"监测平台启动:")
     logger.info(f"  HTTP服务: http://0.0.0.0:{HTTP_PORT}")
     logger.info(f"  WebSocket: ws://0.0.0.0:{WS_PORT}")
+    logger.info(f"  视频流: http://localhost:{HTTP_PORT}/api/video/visible_main")
     
     await asyncio.gather(http_server.serve(), ws_task)
 
