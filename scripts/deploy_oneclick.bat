@@ -2,10 +2,19 @@
 chcp 437 >nul
 setlocal enabledelayedexpansion
 
+:: Get the project root directory (parent of scripts)
+set "SCRIPT_DIR=%~dp0"
+set "PROJECT_DIR=%SCRIPT_DIR%.."
+
 echo.
 echo ============================================
 echo  Lite3 Monitor Platform - Deploy Script
 echo ============================================
+echo.
+
+:: Change to project root
+cd /d "%PROJECT_DIR%"
+echo Working directory: %CD%
 echo.
 
 :: Check Python
