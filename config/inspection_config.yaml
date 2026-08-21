@@ -10,7 +10,7 @@ network:
     username: "admin"
     password: "123456"
   websocket:
-    server_url: "ws://MONITOR_HOST:8765/ws"  # TODO: 部署时替换为监测平台实际IP
+    server_url: "ws://<笔记本IP>:8765/ws"  # TODO: 部署时替换为监测平台实际IP
   monitor:
     http_host: "0.0.0.0"
     http_port: 8000
