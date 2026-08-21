@@ -26,7 +26,7 @@ class WebSocketGateway:
     支持断网缓存和网络恢复后的数据补传。
     """
     
-    def __init__(self, server_url: str = "ws://192.168.1.200:8765/ws",
+    def __init__(self, server_url: str = "ws://192.168.1.103:8765/ws",
                  device_id: str = "LITE3-001",
                  reconnect_interval: float = 5.0):
         """

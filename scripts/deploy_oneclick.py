@@ -480,7 +480,13 @@ class ServiceManager:
         log_file = PROJECT_ROOT / 'data' / 'logs' / 'monitor.log'
         log_file.parent.mkdir(parents=True, exist_ok=True)
         
-        print_info("启动监测平台服务 (http://192.168.1.103:8000)...")
+        print_info("监测平台应在操作员笔记本上独立运行:")
+        print_info("  1. 在笔记本上执行: python3 scripts/start_monitor.py")
+        print_info("  2. 访问地址: http://localhost:8000")
+        print_info("")
+        print_info("感知主机服务:")
+        print_info("  WebSocket: ws://192.168.1.103:8765/ws")
+        print_info("  UDP控制: 192.168.1.103:43893")
         
         try:
             # 后台启动
@@ -498,10 +504,10 @@ class ServiceManager:
             # 验证服务
             import requests
             try:
-                resp = requests.get('http://192.168.1.103:8000/api/status', timeout=5)
+                # 监测平台已在笔记本上运行，无需检查
                 if resp.status_code == 200:
                     print_success(f"监测平台启动成功 (PID: {process.pid})")
-                    print_info(f"访问地址: http://192.168.1.103:8000")
+                    print_info("监测平台地址: http://localhost:8000")
                     print_info(f"查看日志: tail -f {log_file}")
                     return True
                 else:
@@ -689,7 +695,11 @@ class DeploymentOrchestrator:
         elapsed = time.time() - self.start_time
         print_header("部署完成")
         print_success(f"部署耗时: {elapsed:.1f} 秒")
-        print_info("请访问监测平台: http://192.168.1.103:8000")
+        print_info("")
+        print_info("✅ 部署完成！")
+        print_info("请切换到操作员笔记本，运行以下命令启动监测平台:")
+        print_info("  python3 scripts/start_monitor.py")
+        print_info("然后通过浏览器访问: http://localhost:8000")
         print_info("查看日志: tail -f data/logs/monitor.log")
         
         self._print_summary()

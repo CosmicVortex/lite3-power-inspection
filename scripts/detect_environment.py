@@ -236,7 +236,8 @@ def check_network(result):
         {"ip": "192.168.1.103", "port": 43893, "protocol": "UDP", "name": "运动主机"},
         {"ip": "192.168.1.108", "port": 80, "protocol": "HTTP", "name": "云台相机"},
         {"ip": "192.168.1.108", "port": 554, "protocol": "RTSP", "name": "RTSP流"},
-        {"ip": "192.168.1.200", "port": 8765, "protocol": "WebSocket", "name": "监测平台"},
+        # 注意：监测平台独立部署在笔记本上，监听本地8765端口
+        # 感知主机通过WebSocket连接到笔记本的192.168.1.103:8765
     ]
     
     unreachable = []

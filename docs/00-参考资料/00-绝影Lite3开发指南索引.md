@@ -182,7 +182,6 @@ Welcome to the DeepRobotics Jueying Lite3 Development Guide! Please click to swi
 
 | 设备 | IP地址 | 说明 |
 |------|--------|------|
-| 监测平台 | 192.168.1.200 | 上位机/服务器 |
 | 云台相机 | 192.168.1.108 | 双光谱云台 |
 | 感知主机 | 192.168.1.103 | Jetson NX |
 | 运动主机 | 192.168.1.103 | RK3588 |

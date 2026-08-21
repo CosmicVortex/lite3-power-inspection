@@ -6,7 +6,7 @@ Monitor Platform Startup Script
 Usage:
   python3 start_monitor.py                    # Start monitor platform
   python3 start_monitor.py --diagnostic       # Run diagnostic first
-  python3 start_monitor.py --port 8080        # Specify port
+  python3 start_monitor.py --port 8080        # Specify HTTP port
   python3 start_monitor.py --host 0.0.0.0     # Specify host
 """
 
@@ -59,7 +59,6 @@ async def main():
     parser = argparse.ArgumentParser(description="Yueying Lite3 Monitor Platform")
     parser.add_argument("--diagnostic", action="store_true", help="Run environment diagnostic before start")
     parser.add_argument("--port", type=int, default=8000, help="HTTP port (default: 8000)")
-    parser.add_argument("--ws-port", type=int, default=8765, help="WebSocket port (default: 8765)")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Listen address (default: 0.0.0.0)")
     
     args = parser.parse_args()
@@ -80,22 +79,27 @@ async def main():
         sys.exit(1)
     
     # Start service
-    from monitor_platform.server import app, monitor
+    from monitor_platform.server import app, monitor, WS_PORT, HTTP_PORT
     
-    logger.info(f"HTTP service: http://{args.host}:{args.port}")
-    logger.info(f"WebSocket: ws://{args.host}:{args.ws_port}/ws")
+    # Use server's configured ports, override with command line if needed
+    http_port = args.port
+    ws_port = WS_PORT  # Use the port configured in server.py
+    
+    logger.info(f"HTTP service: http://{args.host}:{http_port}")
+    logger.info(f"WebSocket: ws://{args.host}:{ws_port}/ws")
     logger.info("")
     logger.info("Press Ctrl+C to stop service")
     logger.info("=" * 60)
     
     import uvicorn
-    uvicorn.run(
+    config = uvicorn.Config(
         app,
         host=args.host,
-        port=args.port,
-        ws_port=args.ws_port,
+        port=http_port,
         log_level="info"
     )
+    server = uvicorn.Server(config)
+    await server.serve()
 
 
 if __name__ == "__main__":
