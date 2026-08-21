@@ -234,6 +234,51 @@ TEMP_ALARM: 50                    # 温度告警阈值(℃)
 
 ---
 
+## 目录结构
+
+```
+lite3-power-inspection/
+├── README.md
+├── config/inspection_config.yaml
+├── src/                    # 源代码
+│   ├── app/main.py         # 主程序入口
+│   ├── gateway/            # 通信网关
+│   ├── perception/         # 感知模块
+│   ├── services/           # 服务模块
+│   └── storage/            # 存储模块
+├── scripts/                # 脚本
+│   ├── run_demo.py         # 演示启动
+│   └── offline_install.sh  # 离线安装
+├── deliverables/           # 部署包
+└── docs/                   # 文档
+```
+
+## 端口配置
+
+| 端口 | 协议 | 用途 |
+|------|------|------|
+| 43893 | UDP | 运动控制指令 |
+| 43894 | UDP | 状态数据接收 |
+| 8765 | WebSocket | 数据通信 |
+| 8000 | HTTP | 监测平台Web界面 |
+| 8080 | HTTP | 检测图片服务 |
+| 554 | RTSP | 视频流 |
+
+## 部署检查清单
+
+### 感知主机
+- [ ] SSH可登录 (ysc@192.168.1.103, 密码: `'`)
+- [ ] 依赖已安装: `./scripts/offline_install.sh sensors`
+- [ ] WebSocket地址已配置
+- [ ] 演示可运行: `python3 scripts/run_demo.py --mode simulation`
+
+### 监测平台
+- [ ] 已运行 `start_monitor.bat`
+- [ ] 可访问 http://localhost:8000
+- [ ] WebSocket端口8765未被占用
+
+---
+
 ## 技术文档
 
 | 文档 | 说明 |
