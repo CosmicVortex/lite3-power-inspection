@@ -1,8 +1,20 @@
 # Monitor Platform Dependencies
-# Minimal requirements for web monitoring platform
-# Total size: ~2.5MB
+# 监测平台依赖清单
 
-websockets>=12.0
+# Web框架
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
+websockets>=12.0
 pydantic>=2.0.0
+
+# 视频处理
+opencv-python>=4.8.0
+numpy>=1.24.0
+Pillow>=10.0.0
+
+# HTTP客户端
+aiohttp>=3.9.0
+requests>=2.31.0
+
+# 工具库
+python-multipart>=0.0.6
