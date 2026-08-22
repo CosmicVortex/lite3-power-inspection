@@ -801,6 +801,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
             .sidebar-logo-text, .nav-item-text, .nav-section-title, .nav-item-badge { display: none; }
             .nav-item { justify-content: center; padding: var(--space-md); }
             .main-wrapper { margin-left: 60px; }
+            .video-grid { grid-template-columns: 1fr; }
         }
         
         @media (max-width: 768px) {
@@ -951,6 +952,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
                             <div class="video-overlay">
                                 <span class="video-tag">CAM-01</span>
                                 <span class="video-tag" id="visibleMainFps">30 FPS</span>
+                                <span class="video-tag" id="visibleMainConn" style="background: var(--success);">连接正常</span>
                             </div>
                         </div>
                     </div>
@@ -965,6 +967,7 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
                             <div class="video-overlay">
                                 <span class="video-tag">THERMAL</span>
                                 <span class="video-tag" id="thermalTemp">35.0°C</span>
+                                <span class="video-tag" id="thermalConn" style="background: var(--success);">连接正常</span>
                             </div>
                         </div>
                     </div>
@@ -1033,6 +1036,25 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
                                     <div class="data-row">
                                         <span class="data-label">告警阈值</span>
                                         <span class="data-value">50.0°C</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- 阈值设置 -->
+                            <div style="margin-top: var(--space-lg); padding-top: var(--space-lg); border-top: 1px solid var(--ghost-palest);">
+                                <div style="font-size: 12px; color: var(--ghost-light); margin-bottom: var(--space-md);">阈值设置（可编辑）</div>
+                                <div style="display: flex; gap: var(--space-md);">
+                                    <div style="flex: 1;">
+                                        <label style="font-size: 11px; color: var(--ghost-light);">预警阈值</label>
+                                        <input type="number" id="warnThreshold" value="45" min="30" max="60"
+                                               style="width: 100%; padding: var(--space-sm); border: 1px solid var(--ghost-pale); border-radius: var(--radius-sm); font-size: 13px; margin-top: 2px;">
+                                    </div>
+                                    <div style="flex: 1;">
+                                        <label style="font-size: 11px; color: var(--ghost-light);">告警阈值</label>
+                                        <input type="number" id="criticalThreshold" value="50" min="40" max="70"
+                                               style="width: 100%; padding: var(--space-sm); border: 1px solid var(--ghost-pale); border-radius: var(--radius-sm); font-size: 13px; margin-top: 2px;">
+                                    </div>
+                                    <div style="display: flex; align-items: flex-end;">
+                                        <button class="action-btn" onclick="saveThresholds()" style="padding: var(--space-sm) var(--space-md);">保存</button>
                                     </div>
                                 </div>
                             </div>
@@ -1105,6 +1127,34 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
                             <div class="data-row" style="padding: var(--space-md) var(--space-lg);">
                                 <span class="data-label">连接状态</span>
                                 <span class="data-value" id="ptzStatusValue" style="color: var(--success);">已连接</span>
+                            </div>
+                        </div>
+                        <!-- 云台控制面板 -->
+                        <div style="padding: var(--space-lg); border-top: 1px solid var(--ghost-palest);">
+                            <div style="font-size: 12px; color: var(--ghost-light); margin-bottom: var(--space-md);">云台控制</div>
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <div style="display: flex; flex-direction: column; align-items: center; gap: var(--space-sm);">
+                                    <span style="font-size: 11px; color: var(--ghost-light);">偏航角</span>
+                                    <input type="range" id="ptzYawSlider" min="-280" max="280" value="0"
+                                           style="width: 120px;" oninput="updatePTZ('yaw', this.value)">
+                                    <span id="ptzYawSliderVal" style="font-size: 11px; color: var(--ghost-mid);">0°</span>
+                                </div>
+                                <div style="display: flex; flex-direction: column; align-items: center; gap: var(--space-sm);">
+                                    <span style="font-size: 11px; color: var(--ghost-light);">俯仰角</span>
+                                    <input type="range" id="ptzPitchSlider" min="-115" max="40" value="-30"
+                                           style="width: 120px;" oninput="updatePTZ('pitch', this.value)">
+                                    <span id="ptzPitchSliderVal" style="font-size: 11px; color: var(--ghost-mid);">-30°</span>
+                                </div>
+                                <div style="display: flex; flex-direction: column; align-items: center; gap: var(--space-sm);">
+                                    <span style="font-size: 11px; color: var(--ghost-light);">变倍</span>
+                                    <input type="range" id="ptzZoomSlider" min="1" max="20" value="1"
+                                           style="width: 120px;" oninput="updatePTZ('zoom', this.value)">
+                                    <span id="ptzZoomSliderVal" style="font-size: 11px; color: var(--ghost-mid);">1x</span>
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: var(--space-sm); margin-top: var(--space-md); justify-content: center;">
+                                <button class="action-btn" onclick="ptzHome()">⌂ 回零</button>
+                                <button class="action-btn" onclick="ptzConnect()">🔗 重连</button>
                             </div>
                         </div>
                     </div>
@@ -1293,12 +1343,109 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
                     <div class="alert-message">${alert.message}</div>
                     <div class="alert-time">${new Date(alert.timestamp).toLocaleTimeString('zh-CN')}</div>
                 </div>
+                <button onclick="clearAlert(this)" style="background:none;border:none;cursor:pointer;font-size:16px;color:var(--ghost-light);padding:2px 6px;">✕</button>
             `;
             list.insertBefore(item, list.firstChild);
             
             while (list.children.length > 10) list.removeChild(list.lastChild);
             document.getElementById('alertCount').textContent = list.children.length;
             document.getElementById('alertBadge').textContent = list.children.length;
+        }
+        
+        function clearAlert(btn) {
+            const item = btn.parentElement;
+            item.remove();
+            const list = document.getElementById('alertList');
+            if (list.children.length === 0) {
+                list.innerHTML = '<div class="empty-state">暂无告警信息</div>';
+            }
+            document.getElementById('alertCount').textContent = list.children.length;
+            document.getElementById('alertBadge').textContent = list.children.length;
+        }
+        
+        // 云台控制函数
+        function updatePTZ(param, value) {
+            // 更新显示值
+            const val = parseFloat(value);
+            if (param === 'yaw') {
+                document.getElementById('ptzYawSliderVal').textContent = val.toFixed(0) + '°';
+            } else if (param === 'pitch') {
+                document.getElementById('ptzPitchSliderVal').textContent = val.toFixed(0) + '°';
+            } else if (param === 'zoom') {
+                document.getElementById('ptzZoomSliderVal').textContent = val.toFixed(0) + 'x';
+            }
+            
+            // 发送控制指令
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'ptz_control',
+                    parameter: param,
+                    value: val
+                }));
+            }
+        }
+        
+        function ptzHome() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'command', command: 'home' }));
+            }
+        }
+        
+        function ptzConnect() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'ptz_connect' }));
+            }
+        }
+        
+        // 温度阈值设置
+        function saveThresholds() {
+            const warnThreshold = parseFloat(document.getElementById('warnThreshold').value);
+            const criticalThreshold = parseFloat(document.getElementById('criticalThreshold').value);
+            
+            // 验证阈值
+            if (warnThreshold >= criticalThreshold) {
+                alert('预警阈值必须小于告警阈值');
+                return;
+            }
+            
+            // 发送阈值设置
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'temperature_threshold',
+                    warn: warnThreshold,
+                    critical: criticalThreshold
+                }));
+            }
+            
+            // 更新显示
+            document.querySelectorAll('#tempDisplay + .data-row .data-value').forEach((el, i) => {
+                if (i === 1) el.textContent = warnThreshold + '.0°C';
+                if (i === 2) el.textContent = criticalThreshold + '.0°C';
+            });
+            
+            alert('阈值已保存');
+        }
+        
+        // 视频连接状态检测
+        function updateVideoStatus(streamName, connected) {
+            const statusEl = document.getElementById(streamName + 'Status');
+            const connEl = document.getElementById(streamName + 'Conn');
+            
+            if (connected) {
+                statusEl.textContent = '● 在线';
+                statusEl.className = 'video-status';
+                if (connEl) {
+                    connEl.textContent = '连接正常';
+                    connEl.style.background = 'var(--success)';
+                }
+            } else {
+                statusEl.textContent = '● 离线';
+                statusEl.className = 'video-status offline';
+                if (connEl) {
+                    connEl.textContent = '连接失败';
+                    connEl.style.background = 'var(--danger)';
+                }
+            }
         }
         
         function pressKey(key) {
@@ -1327,6 +1474,23 @@ GHOST_ADMIN_HTML = """<!DOCTYPE html>
                 document.getElementById('visibleMainImg').src = `/api/video/visible_main?t=${timestamp}`;
                 document.getElementById('thermalImg').src = `/api/video/thermal?t=${timestamp}`;
             }, 1000);
+            
+            // 检测视频连接状态（每5秒）
+            setInterval(async () => {
+                try {
+                    const resp1 = await fetch('/api/video/visible_main?t=' + Date.now());
+                    updateVideoStatus('visibleMain', resp1.ok);
+                } catch (e) {
+                    updateVideoStatus('visibleMain', false);
+                }
+                
+                try {
+                    const resp2 = await fetch('/api/video/thermal?t=' + Date.now());
+                    updateVideoStatus('thermal', resp2.ok);
+                } catch (e) {
+                    updateVideoStatus('thermal', false);
+                }
+            }, 5000);
         }
         
         // 键盘控制
